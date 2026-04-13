@@ -1,0 +1,16 @@
+[project]
+name = "bottibot"
+version = "0.1.0"
+description = "Stock Analyzer & future Crypto Trading Bot"
+requires-python = ">=3.12"
+dependencies = [
+    "yfinance>=0.2.51",
+    "pandas>=2.2.2",
+    "numpy>=1.26.4",
+    "streamlit>=1.40.1",
+    "plotly>=5.24.1",
+    "requests>=2.32.3",
+    "apscheduler>=3.10.4",
+    "rich>=13.9.4",
+    "python-dotenv>=1.0.1",
+]
