@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -107,19 +108,33 @@ if os.path.exists(cache_file):
 
 # Lancer une nouvelle analyse
 if run_button:
-    with st.spinner(f"Analyse de {len(tickers)} actions en cours..."):
+    concurrency = 5
+    with st.spinner(f"Analyzing {len(tickers)} stocks (concurrency={concurrency})..."):
         progress_bar = st.progress(0)
         results_cache = []
-        for i, ticker in enumerate(tickers):
-            progress_bar.progress((i + 1) / len(tickers), text=f"Analyse {ticker}...")
-            result = analyze_ticker(ticker, vix_regime=vix_regime)
-            if result:
-                results_cache.append(result)
+        completed = 0
+
+        def _analyze(ticker):
+            try:
+                return analyze_ticker(ticker, vix_regime=vix_regime)
+            except Exception:
+                return None
+
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {executor.submit(_analyze, t): t for t in tickers}
+            for future in as_completed(futures):
+                ticker = futures[future]
+                completed += 1
+                progress_bar.progress(completed / len(tickers), text=f"Analyzed {ticker} ({completed}/{len(tickers)})")
+                result = future.result()
+                if result:
+                    results_cache.append(result)
+
         results_cache.sort(key=lambda x: x.get("score", 0), reverse=True)
         with open(cache_file, "w") as f:
             json.dump(results_cache, f, indent=2, default=str)
         progress_bar.empty()
-    st.success(f"✅ {len(results_cache)} actions analysées avec succès !")
+    st.success(f"✅ {len(results_cache)} stocks analyzed successfully!")
 
 # Afficher les résultats
 if results_cache:

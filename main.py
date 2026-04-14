@@ -1,7 +1,7 @@
 # main.py — Point d'entrée du Stock Analyzer
 
 import json
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
@@ -107,10 +107,15 @@ def analyze_ticker(
     }
 
 
-def run_screener(tickers: list[str] | None = None, top_n: int = None, max_per_sector: int = 0) -> list[dict]:
+def run_screener(
+    tickers: list[str] | None = None,
+    top_n: int = None,
+    max_per_sector: int = 0,
+    concurrency: int = 5,
+) -> list[dict]:
     """
-    Lance le screener sur une liste de tickers.
-    Retourne les résultats triés par score.
+    Run the screener on a list of tickers with bounded concurrency.
+    Returns results sorted by score.
     """
     tickers = tickers or ALL_TICKERS
     top_n   = top_n   or DASHBOARD["top_n"]
@@ -127,7 +132,8 @@ def run_screener(tickers: list[str] | None = None, top_n: int = None, max_per_se
 
     console.print(Panel(
         f"[bold cyan]📊 Stock Analyzer[/bold cyan]\n"
-        f"Analyse de {len(tickers)} actifs — {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+        f"Analyzing {len(tickers)} tickers — {datetime.now().strftime('%Y-%m-%d %H:%M')} "
+        f"(concurrency={concurrency})\n"
         f"Market regime: [{vix_color}]{vix_display}[/{vix_color}]",
         expand=False
     ))
@@ -139,18 +145,22 @@ def run_screener(tickers: list[str] | None = None, top_n: int = None, max_per_se
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         console=console,
     ) as progress:
-        task = progress.add_task("Analyse en cours...", total=len(tickers))
+        task = progress.add_task("Analyzing...", total=len(tickers))
 
-        for ticker in tickers:
-            progress.update(task, description=f"[cyan]{ticker:<12}[/cyan]")
+        def _analyze_safe(ticker: str):
             try:
-                result = analyze_ticker(ticker, vix_regime=vix_regime, benchmark_df=benchmark_df)
+                return ticker, analyze_ticker(ticker, vix_regime=vix_regime, benchmark_df=benchmark_df)
+            except Exception:
+                return ticker, None
+
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = [executor.submit(_analyze_safe, t) for t in tickers]
+            for future in as_completed(futures):
+                ticker, result = future.result()
+                progress.update(task, description=f"[cyan]{ticker:<12}[/cyan]")
                 if result:
                     results.append(result)
-            except Exception as e:
-                pass  # On ignore silencieusement les erreurs individuelles
-            progress.advance(task)
-            time.sleep(0.1)  # Rate limiting poli
+                progress.advance(task)
 
     ranked = rank_stocks(results, max_per_sector=max_per_sector)
 
@@ -161,7 +171,7 @@ def run_screener(tickers: list[str] | None = None, top_n: int = None, max_per_se
     output_path = "results_latest.json"
     with open(output_path, "w") as f:
         json.dump(ranked, f, indent=2, default=str)
-    console.print(f"\n[dim]💾 Résultats sauvegardés dans {output_path}[/dim]")
+    console.print(f"\n[dim]💾 Results saved to {output_path}[/dim]")
 
     return ranked
 
@@ -255,6 +265,8 @@ if __name__ == "__main__":
                         help="Specific tickers to analyze")
     parser.add_argument("--max-per-sector", type=int, default=0,
                         help="Max stocks per sector in results (0 = no cap)")
+    parser.add_argument("--concurrency", type=int, default=5,
+                        help="Max concurrent Yahoo API calls (default 5)")
     args = parser.parse_args()
 
     if args.tickers:
@@ -264,4 +276,9 @@ if __name__ == "__main__":
     else:
         tickers = UNIVERSES[args.universe]
 
-    run_screener(tickers=tickers, top_n=args.top, max_per_sector=args.max_per_sector)
+    run_screener(
+        tickers=tickers,
+        top_n=args.top,
+        max_per_sector=args.max_per_sector,
+        concurrency=args.concurrency,
+    )

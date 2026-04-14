@@ -1,57 +1,77 @@
-# bottibot — Context pour Claude Code
+# bottibot — Claude Code Context
 
-## Projet
-Stock Analyzer + futur Crypto Trading Bot. Développé avec Marc (développeur backend Go/Rust/Python chez Kaiko, novice en finance).
+## Project
+Stock Analyzer + future Crypto Trading Bot. Python-based, dependency-managed via `uv`.
 
-## Ce qui est déjà construit (Session 1)
+## Current state
 
-Architecture complète du **Stock Analyzer** :
+Full **Stock Analyzer** architecture:
 
 ```
 bottibot/
-├── config.py              # Univers d'actions, poids de scoring, seuils fondamentaux
-├── main.py                # Screener CLI avec Rich (tableau + détail top 3)
-├── data/fetcher.py        # Yahoo Finance — OHLCV + fondamentaux
+├── config.py              # Universes, scoring weights, sector benchmarks, VIX regime config
+├── main.py                # CLI screener with Rich (ranking + top-3 detail)
+├── backtest.py            # Monthly-rebalance backtest vs SPY benchmark
+├── pyproject.toml         # Dependencies (managed by uv)
+├── data/fetcher.py        # Yahoo Finance — OHLCV, fundamentals, VIX, benchmark, earnings
 ├── analysis/
-│   ├── technical.py       # EMA20/50/200, RSI, MACD, Bollinger, ATR, ADX, Momentum
-│   └── fundamental.py     # Marges, ROE, P/E, PEG, croissance CA/EPS, santé bilan
-├── scoring/engine.py      # Score 0-100 pondéré + stop-loss/take-profit suggérés (ATR-based)
-└── dashboard/app.py       # Streamlit : classement, scatter, graphique bougies, détail
+│   ├── technical.py       # EMA, RSI, MACD, Bollinger, ATR, ADX, momentum, relative strength vs SPY
+│   └── fundamental.py     # Sector-relative scoring (margin, ROE, P/E, growth, balance sheet)
+├── scoring/engine.py      # Composite 0-100 score, VIX-adjusted weights, ATR-based SL/TP
+└── dashboard/app.py       # Streamlit: ranking, charts, VIX regime banner, detail view
 ```
 
-## Méthode de scoring
+## Scoring method
 
-| Composante  | Poids | Logique |
-|-------------|-------|---------|
-| Momentum    | 25%   | Perf 10j/20j/60j/120j pondérée, normalisée -30%→0 / +30%→1 |
-| Tendance    | 25%   | EMA20>EMA50>EMA200, bonus si alignées + MACD bullish |
-| Fondamental | 20%   | Qualité×0.35 + Croissance×0.30 + Valeur×0.20 + Santé×0.15 |
-| Qualité     | 10%   | Marge brute, marge opé, ROE |
-| RSI         | 10%   | <35 survendu=0.8, >70 suracheté=0.2, sinon linéaire |
-| Volume      | 10%   | volume/volume_avg_20j, capé à 1.0 pour ratio≥2 |
+| Component   | Weight | Logic |
+|-------------|--------|-------|
+| Momentum    | 25%    | Absolute momentum (60%) + relative strength vs SPY (40%), 10d/20d/60d/120d weighted |
+| Trend       | 25%    | EMA20 > EMA50 > EMA200, +5% bonus if aligned & MACD bullish |
+| Fundamental | 20%    | Quality×0.35 + Growth×0.30 + Value×0.20 + Health×0.15, scored relative to sector benchmarks |
+| Quality     | 10%    | Gross margin, operating margin, ROE — all vs sector norm |
+| RSI         | 10%    | <35 oversold=0.8, >70 overbought=0.2, otherwise linear |
+| Volume      | 10%    | volume / volume_avg_20d, capped at 1.0 for ratio ≥ 2 |
 
-Score → Recommandation : 75+ FORT ACHAT · 62+ ACHAT · 50+ NEUTRE · 38+ PRUDENCE · <38 ÉVITER
+Score → Signal: 75+ STRONG BUY · 62+ BUY · 50+ NEUTRAL · 38+ CAUTION · <38 AVOID
 
-Stop-loss = -1.5×ATR% · Take-profit = SL × (3.0 si score≥75, 2.0 si ≥62, 1.5 sinon)
+Stop-loss = -1.5×ATR% · Take-profit = SL × (3.0 if score≥75, 2.0 if ≥62, 1.5 otherwise)
+
+## VIX regime adaptation
+
+Weights shift based on market volatility (one `^VIX` fetch per screener run):
+- **CALM** (VIX < 20): base weights (momentum-friendly)
+- **ELEVATED** (VIX 20–30): -7% momentum, -3% trend, +5% fundamental, +5% quality
+- **PANIC** (VIX > 30): -12% momentum, -5% trend, +8% fundamental, +7% quality
+
+## Sector-relative fundamentals
+
+`SECTOR_BENCHMARKS` in `config.py` holds reference margins/ROE/P/E per sector. Each stock's fundamental metrics are scored against its own sector, so a SaaS 80% margin and a bank 20% margin are both evaluated correctly.
+
+## Backtesting
+
+`backtest.py` runs monthly rebalance: each month it scores all tickers using only data available up to that date, buys top-N equally, holds for one month, measures returns vs SPY. Reports CAGR, alpha, Sharpe, max drawdown, win rate. Technical-only (fundamentals excluded to avoid look-ahead bias).
 
 ## Stack
-- Python 3.12, yfinance, pandas, numpy, Streamlit, Plotly, Rich
+- Python 3.14 via uv, yfinance, pandas, numpy, Streamlit, Plotly, Rich
 
 ## Roadmap
-1. Tester + calibrer le screener, ajuster les poids dans config.py
-2. Alertes Telegram/email quand score > seuil
-3. Crypto Trading Bot (Binance API, paper trading → réel avec 500€)
-   - Stratégie : Mean Reversion en ranging, Momentum en trending
-   - Spot uniquement, pas de levier
+1. Run backtests across more universes and longer windows (24–60 months) to validate the edge
+2. Telegram/email alerts when score crosses a threshold
+3. Crypto Trading Bot (Binance API, paper trading → real with small capital)
+   - Strategy: Mean reversion in ranging markets, momentum in trending
+   - Spot only, no leverage
 
 ## Conventions
-- Tout paramétrable dans config.py (pas de magic numbers dans le code)
-- Scores 0.0-1.0 dans les modules, ×100 uniquement dans scoring/engine.py
-- Erreurs silencieuses par ticker (un échec ne plante pas le screener)
+- All thresholds/weights in `config.py` — no magic numbers in code
+- Scores 0.0–1.0 inside modules, ×100 only in `scoring/engine.py`
+- Silent errors per ticker — a single failure never breaks a batch
+- All user-facing output in English (ticker names, signals, reasons, tables)
 
-## Commandes utiles
+## Useful commands
 ```bash
-python main.py --tickers AAPL NVDA MSFT ASML.AS MC.PA
-python main.py --universe EU_LARGE --top 20
-streamlit run dashboard/app.py
+uv run python main.py --tickers AAPL NVDA MSFT ASML.AS MC.PA
+uv run python main.py --universe EU_LARGE --top 20
+uv run python main.py --universe US_LARGE --max-per-sector 3
+uv run python backtest.py --universe US_LARGE --months 24 --top 5
+uv run streamlit run dashboard/app.py
 ```
