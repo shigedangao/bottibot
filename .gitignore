@@ -22,4 +22,5 @@ Thumbs.db
 
 # Project
 results_latest.json
+.snapshots/
 .env

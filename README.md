@@ -68,6 +68,35 @@ uv run streamlit run dashboard/app.py
 
 Opens http://localhost:8501 in your browser.
 
+### Telegram morning digest
+
+Push a daily digest (top N, score movers vs yesterday, new BUY signals, drop-outs, upcoming earnings) to a Telegram chat.
+
+**Setup (one-time):**
+1. Create a bot via [@BotFather](https://t.me/BotFather) → save the **bot token**
+2. Get your chat ID via [@userinfobot](https://t.me/userinfobot)
+3. Open a chat with your new bot and send `/start` (required — Telegram blocks outbound until you initiate)
+4. Create a `.env` file at the project root:
+   ```
+   TELEGRAM_BOT_TOKEN=123456:AAAA...
+   TELEGRAM_CHAT_ID=123456789
+   ```
+
+**Usage:**
+
+```bash
+# Sanity check the credentials
+uv run python -m bot.telegram --test
+
+# Send today's digest
+uv run python -m bot.telegram --universe US_LARGE --top 5
+
+# Dry-run (prints to stdout, no Telegram push)
+uv run python -m bot.digest --universe US_LARGE --top 5
+```
+
+Daily snapshots are written to `.snapshots/results_YYYY-MM-DD.json` so the next morning's digest can diff scores and signals against the previous run.
+
 ---
 
 ## Structure
@@ -85,6 +114,11 @@ bottibot/
 │   └── fundamental.py     # Sector-relative fundamental scoring
 ├── scoring/
 │   └── engine.py          # Composite scoring engine, VIX-adjusted weights
+├── bot/
+│   ├── digest.py          # Morning digest logic (diff vs previous snapshot)
+│   ├── formatting.py      # Telegram MarkdownV2 formatter
+│   ├── storage.py         # Daily snapshot persistence
+│   └── telegram.py        # One-way Telegram sender
 └── dashboard/
     └── app.py             # Streamlit dashboard
 ```
