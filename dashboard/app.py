@@ -17,6 +17,33 @@ from analysis.technical import compute_indicators
 from main import analyze_ticker, run_screener
 from bot.storage import load_latest, save_latest
 
+
+def _build_price_chart(df, ticker):
+    """Construit un graphique de prix avec EMA + volume."""
+    fig = go.Figure()
+
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["open"], high=df["high"],
+        low=df["low"], close=df["close"], name="Prix",
+    ))
+
+    fig.add_trace(go.Scatter(x=df.index, y=df["ema20"],  mode="lines",
+                              line=dict(color="orange", width=1), name="EMA20"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["ema50"],  mode="lines",
+                              line=dict(color="blue", width=1),   name="EMA50"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["ema200"], mode="lines",
+                              line=dict(color="red", width=1),    name="EMA200"))
+
+    fig.update_layout(
+        title=ticker,
+        xaxis_title="Date",
+        yaxis_title="Prix",
+        xaxis_rangeslider_visible=False,
+        height=450,
+    )
+    return fig
+
+
 # ── Config Streamlit ──────────────────────────────────────────
 st.set_page_config(
     page_title="📊 Stock Analyzer",
@@ -313,31 +340,3 @@ else:
     | RSI | 10% | Ni suracheté ni survendu |
     | Volume | 10% | Confirmation des mouvements |
     """)
-
-
-def _build_price_chart(df, ticker):
-    """Construit un graphique de prix avec EMA + volume."""
-    fig = go.Figure()
-
-    # Bougies
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df["open"], high=df["high"],
-        low=df["low"], close=df["close"], name="Prix",
-    ))
-
-    # EMAs
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema20"],  mode="lines",
-                              line=dict(color="orange", width=1), name="EMA20"))
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema50"],  mode="lines",
-                              line=dict(color="blue", width=1),   name="EMA50"))
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema200"], mode="lines",
-                              line=dict(color="red", width=1),    name="EMA200"))
-
-    fig.update_layout(
-        title=ticker,
-        xaxis_title="Date",
-        yaxis_title="Prix",
-        xaxis_rangeslider_visible=False,
-        height=450,
-    )
-    return fig
