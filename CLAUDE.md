@@ -49,13 +49,17 @@ Weights shift based on market volatility (one `^VIX` fetch per screener run):
 
 ## Backtesting
 
-`backtest.py` runs monthly rebalance: each month it scores all tickers using only data available up to that date, buys top-N equally, holds for one month, measures returns vs SPY. Reports CAGR, alpha, Sharpe, max drawdown, win rate. Technical-only (fundamentals excluded to avoid look-ahead bias).
+`backtest.py` runs monthly rebalance: each month it scores all tickers using only data available up to that date, buys top-N equally, holds for one month, measures returns vs SPY. Reports gross/net CAGR, alpha (gross and net of costs), Sharpe, max drawdown, win rate, and average monthly turnover. Technical-only (fundamentals excluded to avoid look-ahead bias).
+
+Transaction cost model: configurable `BACKTEST["cost_per_side_bps"]` (default 15 bps = ~5 bps fee + ~10 bps slippage). Cost is applied each rebalance proportional to actual turnover — `(buy_fraction + sell_fraction) × cost_per_side / 10_000`. First period charges only the buy side (initial entry from cash).
+
+`--sweep` runs across multiple universes and prints a comparison table — use this to gauge whether the edge generalizes or is overfit to one market.
 
 ## Stack
 - Python 3.14 via uv, yfinance, pandas, numpy, Streamlit, Plotly, Rich
 
 ## Roadmap
-1. Run backtests across more universes and longer windows (24–60 months) to validate the edge
+1. Run 60-month backtests across all major universes and document findings in the repo (validation work — early sweeps suggest the strategy struggles to clear costs over 24 months)
 2. Telegram/email alerts when score crosses a threshold
 3. Crypto Trading Bot (Binance API, paper trading → real with small capital)
    - Strategy: Mean reversion in ranging markets, momentum in trending

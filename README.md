@@ -49,16 +49,48 @@ uv run python main.py --universe US_LARGE --max-per-sector 3
 ### Backtest the strategy
 
 ```bash
-# Default: US_LARGE, 24 months, top 5, vs SPY
+# Default: US_LARGE, 36 months, top 5, with 15 bps/side transaction cost
 uv run python backtest.py
 
 # Custom run
-uv run python backtest.py --universe GROWTH_TECH --months 24 --top 5
-uv run python backtest.py --universe ASIA_LARGE --months 12 --top 3
-uv run python backtest.py --tickers AAPL NVDA MSFT GOOGL AMZN --months 36 --top 3
+uv run python backtest.py --universe GROWTH_TECH --months 36 --top 5
+uv run python backtest.py --universe ASIA_LARGE --months 24 --top 3
+uv run python backtest.py --tickers AAPL NVDA MSFT GOOGL AMZN --months 60 --top 3
+
+# Multi-universe sweep (compare alpha across universes)
+uv run python backtest.py --sweep                                  # default 4 universes
+uv run python backtest.py --sweep US_LARGE EU_LARGE SEMICONDUCTORS # explicit list
+uv run python backtest.py --sweep --months 60 --cost-bps 20        # longer + higher cost
+
+# Stress-test with higher cost assumptions (small caps, illiquid markets)
+uv run python backtest.py --universe SMALL_MID --cost-bps 30
 ```
 
-Outputs: monthly period returns, total return, CAGR, alpha vs SPY, Sharpe, max drawdown, win rate.
+**Outputs**: per-period returns with turnover, gross vs net CAGR, **alpha gross & alpha net** (after costs), Sharpe (net), max drawdown, win rate vs SPY, average monthly turnover, total cost drag, and a **Deploy?** verdict (`STRONG` / `OK` / `WEAK` / `NO`) summarizing the historical edge. Sweep mode shows the verdict as a column for quick comparison across universes.
+
+#### Deploy? verdict
+
+A mechanical multi-criteria readout — **not financial advice**. Computed from the backtest result alone:
+
+| Verdict | Net alpha | Sharpe | Win rate | Max drawdown |
+|---------|-----------|--------|----------|--------------|
+| `STRONG` | ≥ 5% | ≥ 0.70 | ≥ 45% | ≥ -40% |
+| `OK`     | ≥ 2% | ≥ 0.50 | ≥ 40% | ≥ -50% |
+| `WEAK`   | > 0  | (fails OK criteria above) |
+| `NO`     | ≤ 0  | — | — | — |
+
+Tunable via `BACKTEST["deploy_thresholds"]` in `config.py`. The verdict scores each universe in isolation — a universe can pass `STRONG` while the strategy as a whole still fails to generalize across other universes, so always read it alongside the sweep.
+
+#### Transaction cost model
+
+Each rebalance charges `cost_per_side_bps` (default **15 bps** = 5 bps fee + 10 bps slippage, realistic for liquid US large-caps via Degiro/IBKR) on the **changed fraction** of the portfolio:
+
+- Period 0: 100% × cost_per_side (initial buy from cash)
+- Subsequent: `2 × turnover_fraction × cost_per_side` (round-trip on rotated names)
+
+Tune via `--cost-bps` or `BACKTEST["cost_per_side_bps"]` in `config.py`. Bump to 25-40 bps for small-caps or international markets where slippage is wider.
+
+> **Why this matters**: a strategy with 50%+ monthly turnover at 15 bps/side incurs ~2-3% annual drag. Apparent alpha that doesn't survive that cost isn't real edge — it's noise that you'd pay your broker to capture.
 
 ### Dashboard mode (web interface)
 
@@ -294,9 +326,9 @@ Tag shows as `🌱` next to the ticker in the CLI and the dashboard. Tunable via
 Pass `--max-per-sector N` to enforce diversification and prevent the top N being dominated by a single sector.
 
 ### Backtesting
-`backtest.py` runs a monthly rebalance: each month it scores all tickers using data available at that point, buys the top-N equally, holds one month, rebalances. Compares portfolio vs SPY buy-and-hold. Reports CAGR, alpha, Sharpe, max drawdown, win rate.
+`backtest.py` runs a monthly rebalance: each month it scores all tickers using data available at that point, buys the top-N equally, holds one month, rebalances. Compares portfolio vs SPY buy-and-hold. Reports gross/net CAGR, alpha (gross and net of costs), Sharpe, max drawdown, win rate, and average turnover. `--sweep` compares alpha across multiple universes in one run.
 
-> Technical-only backtest (fundamentals are excluded to avoid look-ahead bias, since yfinance does not reliably provide historical fundamentals).
+> Technical-only backtest (fundamentals are excluded to avoid look-ahead bias, since yfinance does not reliably provide historical fundamentals). Includes a configurable transaction cost model (commissions + slippage) — see the [Backtest section](#backtest-the-strategy) above.
 
 ---
 
@@ -310,6 +342,7 @@ Everything is in `config.py`:
 - **Tune sector benchmarks**: edit `SECTOR_BENCHMARKS`
 - **Tune VIX regime thresholds & weight adjustments**: edit `VIX`
 - **Tune emerging potential thresholds**: edit `EMERGING_POTENTIAL` (R&D intensity by sector, forward step-up ratio, PEG cap, etc.)
+- **Tune backtest costs & defaults**: edit `BACKTEST` (`cost_per_side_bps`, default lookback, sweep universes)
 
 ---
 
@@ -326,9 +359,10 @@ Everything is in `config.py`:
 
 ## Roadmap
 
-- [ ] Run longer backtests (36–60 months) across multiple universes to stress-test the edge
+- [x] Transaction cost modeling in the backtest (commissions + slippage, applied to actual turnover)
+- [x] Multi-universe sweep to stress-test edge across markets
+- [ ] Run longer backtests (60+ months) and document the results in this repo
 - [ ] Email/Telegram alerts when a score exceeds a threshold
 - [ ] Score history (tracking changes over time)
-- [ ] Transaction cost modeling in the backtest
 - [ ] Sentiment score (news, Reddit)
 - [ ] Crypto trading bot (Binance spot, paper trading first)

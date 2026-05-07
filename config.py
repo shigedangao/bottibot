@@ -236,6 +236,28 @@ EMERGING_POTENTIAL = {
 }
 
 # ──────────────────────────────────────────────
+# Backtest — transaction cost model
+# Per-side cost in basis points (1 bp = 0.01%). Default 15 bps reflects:
+#   ~5 bps commission/fees (Degiro/IBKR for liquid US large-caps)
+#   ~10 bps slippage (bid/ask + minor market impact)
+# Bump to 25-40 bps for small-caps, illiquid markets, or aggressive turnover.
+# Round-trip cost on a fully-rotated position = 2 × cost_per_side_bps.
+# ──────────────────────────────────────────────
+BACKTEST = {
+    "cost_per_side_bps": 15.0,
+    "default_lookback_months": 36,
+    # Universes used in --sweep when no explicit list is provided
+    "sweep_universes": ["US_LARGE", "EU_LARGE", "GROWTH_TECH", "SEMICONDUCTORS"],
+    # Deploy verdict — multi-criteria readout, NOT financial advice.
+    # All four conditions must hold to earn the label. Negative alpha → "NO".
+    # max_drawdown is negative; thresholds are floors (e.g. -0.40 = MDD must be ≥ -40%).
+    "deploy_thresholds": {
+        "strong": {"alpha_net": 0.05, "sharpe": 0.70, "win_rate": 0.45, "max_drawdown_floor": -0.40},
+        "ok":     {"alpha_net": 0.02, "sharpe": 0.50, "win_rate": 0.40, "max_drawdown_floor": -0.50},
+    },
+}
+
+# ──────────────────────────────────────────────
 # Timeframes d'analyse
 # ──────────────────────────────────────────────
 TIMEFRAMES = {
