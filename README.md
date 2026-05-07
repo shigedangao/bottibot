@@ -169,9 +169,19 @@ echo -n "$TELEGRAM_CHAT_ID"   | gcloud secrets create telegram-chat-id   --data-
 
 ### Build & push the image
 
+Build locally with Docker, tag it for Artifact Registry, then push.
+
 ```bash
-gcloud builds submit --tag ${IMAGE} --project=${PROJECT_ID}
+# One-time: let Docker authenticate to Artifact Registry in this region
+gcloud auth configure-docker ${REGION}-docker.pkg.dev
+
+# Build, tag, push
+docker build -t bottibot:latest .
+docker tag bottibot:latest ${IMAGE}
+docker push ${IMAGE}
 ```
+
+> If you're on Apple Silicon, add `--platform=linux/amd64` to `docker build` — Cloud Run runs `linux/amd64` and won't start an `arm64` image.
 
 ### Deploy the dashboard (Cloud Run Service)
 
