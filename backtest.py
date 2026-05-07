@@ -132,6 +132,7 @@ def run_backtest(
     benchmark_ticker: str = "SPY",
     concurrency: int = 5,
     cost_per_side_bps: float | None = None,
+    stickiness_bonus_pts: float | None = None,
     label: str | None = None,
     verbose: bool = True,
 ) -> dict:
@@ -139,17 +140,22 @@ def run_backtest(
     Run a monthly-rebalance backtest.
     Returns dict with portfolio returns per period and aggregate stats.
     Applies a per-side transaction cost (commission + slippage) on each rebalance,
-    proportional to actual turnover.
+    proportional to actual turnover. Stickiness gives currently-held positions
+    a score bonus during sorting so a challenger must beat them by that gap to
+    take their slot — reduces churn.
     """
     if cost_per_side_bps is None:
         cost_per_side_bps = BACKTEST["cost_per_side_bps"]
+    if stickiness_bonus_pts is None:
+        stickiness_bonus_pts = BACKTEST["stickiness_bonus_pts"]
 
     if verbose:
         title = label or "Backtest"
         console.print(Panel(
             f"[bold cyan]📊 {title}[/bold cyan]\n"
             f"Universe: {len(tickers)} tickers | Hold top {top_n} | Lookback: {lookback_months} months\n"
-            f"Cost: {cost_per_side_bps:.0f} bps/side ({cost_per_side_bps*2:.0f} bps round-trip on full rotation)",
+            f"Cost: {cost_per_side_bps:.0f} bps/side ({cost_per_side_bps*2:.0f} bps round-trip on full rotation)\n"
+            f"Stickiness: +{stickiness_bonus_pts:.1f} pts to currently-held positions",
             expand=False,
         ))
 
@@ -243,8 +249,11 @@ def run_backtest(
         if not scored:
             continue
 
-        # Pick top N
-        scored.sort(key=lambda x: x[1], reverse=True)
+        # Pick top N — currently-held positions get a stickiness bonus so a
+        # challenger must beat them by more than `stickiness_bonus_pts` to displace.
+        def _adjusted(item: tuple) -> float:
+            return item[1] + (stickiness_bonus_pts if item[0] in prev_picks else 0.0)
+        scored.sort(key=_adjusted, reverse=True)
         picks = scored[:top_n]
 
         # Equal-weight portfolio return for this period (gross)
@@ -347,6 +356,7 @@ def run_backtest(
         "n_periods":              n_periods,
         "years":                  round(years, 2),
         "cost_per_side_bps":      cost_per_side_bps,
+        "stickiness_bonus_pts":   stickiness_bonus_pts,
         "total_return_gross":     total_return_gross,
         "total_return_net":       total_return_net,
         "cagr_gross":             cagr_gross,
@@ -428,6 +438,7 @@ def _print_results(r: dict):
     summary.add_row("Win Rate vs SPY",     f"[{win_color}]{r['win_rate']*100:.0f}%[/{win_color}]", "—")
     summary.add_row("Avg Turnover/mo",     f"{r['avg_turnover']*100:.0f}%",       "")
     summary.add_row("Cost / side",         f"{r['cost_per_side_bps']:.0f} bps",   "")
+    summary.add_row("Stickiness",          f"+{r['stickiness_bonus_pts']:.1f} pts", "")
 
     console.print(summary)
 
@@ -453,12 +464,13 @@ def run_sweep(
     benchmark_ticker: str,
     concurrency: int,
     cost_per_side_bps: float,
+    stickiness_bonus_pts: float,
 ) -> dict[str, dict]:
     """Run the backtest across several universes and print a comparison."""
     console.print(Panel(
         f"[bold cyan]🔁 Backtest sweep[/bold cyan]\n"
         f"Universes: {', '.join(universe_names)}\n"
-        f"Hold top {top_n} | {lookback_months} months | cost {cost_per_side_bps:.0f} bps/side",
+        f"Hold top {top_n} | {lookback_months} months | cost {cost_per_side_bps:.0f} bps/side | stickiness +{stickiness_bonus_pts:.1f} pts",
         expand=False,
     ))
 
@@ -472,6 +484,7 @@ def run_sweep(
             benchmark_ticker=benchmark_ticker,
             concurrency=concurrency,
             cost_per_side_bps=cost_per_side_bps,
+            stickiness_bonus_pts=stickiness_bonus_pts,
             label=name,
             verbose=False,
         )
@@ -548,6 +561,9 @@ if __name__ == "__main__":
                         help="Max concurrent Yahoo API calls when fetching history (default 5)")
     parser.add_argument("--cost-bps", type=float, default=BACKTEST["cost_per_side_bps"],
                         help=f"Per-side transaction cost in bps (default {BACKTEST['cost_per_side_bps']:.0f})")
+    parser.add_argument("--stickiness", type=float, default=BACKTEST["stickiness_bonus_pts"],
+                        help=f"Score bonus for currently-held positions during sort, in score points "
+                             f"(default {BACKTEST['stickiness_bonus_pts']:.1f}). 0 = pure top-N every month.")
     parser.add_argument("--sweep", nargs="*", default=None,
                         help=f"Run across multiple universes. Empty = config default "
                              f"({', '.join(BACKTEST['sweep_universes'])}). "
@@ -567,6 +583,7 @@ if __name__ == "__main__":
             benchmark_ticker=args.benchmark,
             concurrency=args.concurrency,
             cost_per_side_bps=args.cost_bps,
+            stickiness_bonus_pts=args.stickiness,
         )
     else:
         if args.tickers:
@@ -586,5 +603,6 @@ if __name__ == "__main__":
             benchmark_ticker=args.benchmark,
             concurrency=args.concurrency,
             cost_per_side_bps=args.cost_bps,
+            stickiness_bonus_pts=args.stickiness,
             label=label,
         )

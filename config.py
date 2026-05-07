@@ -246,6 +246,11 @@ EMERGING_POTENTIAL = {
 BACKTEST = {
     "cost_per_side_bps": 15.0,
     "default_lookback_months": 36,
+    # Stickiness — currently-held positions get this many points added during
+    # the rebalance sort, so a challenger must beat a held name by more than
+    # this gap to displace it. Reduces turnover and cost drag.
+    # 0.0 = pure top-N every month; 5.0 = mild stickiness; 10.0 = strong.
+    "stickiness_bonus_pts": 5.0,
     # Universes used in --sweep when no explicit list is provided
     "sweep_universes": ["US_LARGE", "EU_LARGE", "GROWTH_TECH", "SEMICONDUCTORS"],
     # Deploy verdict — multi-criteria readout, NOT financial advice.

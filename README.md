@@ -92,6 +92,12 @@ Tune via `--cost-bps` or `BACKTEST["cost_per_side_bps"]` in `config.py`. Bump to
 
 > **Why this matters**: a strategy with 50%+ monthly turnover at 15 bps/side incurs ~2-3% annual drag. Apparent alpha that doesn't survive that cost isn't real edge — it's noise that you'd pay your broker to capture.
 
+#### Stickiness (turnover throttle)
+
+Currently-held positions get a configurable score bonus (`BACKTEST["stickiness_bonus_pts"]`, default **5.0**) when the rebalance sort runs, so a challenger must beat a held name by more than that gap to displace it. `0` reproduces pure top-N every month; higher values hold positions longer.
+
+Tune via `--stickiness`. In our 60-month sweep, raising stickiness from 0 → 5 cut average turnover from 67–79%/mo down to 55–64%/mo and lifted net alpha by **+5–7 pp** on the universes where the strategy has edge (SEMICONDUCTORS, US_LARGE) — most of the gain came from capturing momentum continuation, not just cost savings. On universes without edge (EU_LARGE, GROWTH_TECH) it made results slightly worse: holding losers longer hurts when the underlying score has no signal.
+
 ### Dashboard mode (web interface)
 
 ```bash
@@ -371,6 +377,7 @@ Everything is in `config.py`:
 
 - [x] Transaction cost modeling in the backtest (commissions + slippage, applied to actual turnover)
 - [x] Multi-universe sweep to stress-test edge across markets
+- [x] Stickiness threshold to throttle turnover and capture continuation
 - [ ] Run longer backtests (60+ months) and document the results in this repo
 - [ ] Email/Telegram alerts when a score exceeds a threshold
 - [ ] Score history (tracking changes over time)
