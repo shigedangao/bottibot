@@ -98,6 +98,14 @@ Currently-held positions get a configurable score bonus (`BACKTEST["stickiness_b
 
 Tune via `--stickiness`. In our 60-month sweep, raising stickiness from 0 → 5 cut average turnover from 67–79%/mo down to 55–64%/mo and lifted net alpha by **+5–7 pp** on the universes where the strategy has edge (SEMICONDUCTORS, US_LARGE) — most of the gain came from capturing momentum continuation, not just cost savings. On universes without edge (EU_LARGE, GROWTH_TECH) it made results slightly worse: holding losers longer hurts when the underlying score has no signal.
 
+#### Regime filter (optional, default OFF)
+
+Classic trend-following rule: when the benchmark (default SPY) trades below its 200-day MA, force the portfolio to cash for that period. Toggle with `--regime-filter`.
+
+Empirically the filter underperformed in our 60-month sweep across all four universes — SPY's 200d-MA whipsaws in 2022-23 caused round-trip costs on the cash-in/cash-out transitions that exceeded the drawdown savings. On `US_LARGE` it cut alpha from +12.4% → -0.5% *and* widened max drawdown from -23% → -33%, because cash exits triggered near local lows and re-entries near subsequent highs.
+
+Kept as a togglable option since longer windows or markets with cleaner bear-market regimes (e.g., 2008-style sustained downtrends) might tell a different story, but **default is OFF**.
+
 ### Dashboard mode (web interface)
 
 ```bash
@@ -378,6 +386,7 @@ Everything is in `config.py`:
 - [x] Transaction cost modeling in the backtest (commissions + slippage, applied to actual turnover)
 - [x] Multi-universe sweep to stress-test edge across markets
 - [x] Stickiness threshold to throttle turnover and capture continuation
+- [x] Tested SPY 200d MA regime filter — empirically hurt more than it helped, kept as an off-by-default option
 - [ ] Run longer backtests (60+ months) and document the results in this repo
 - [ ] Email/Telegram alerts when a score exceeds a threshold
 - [ ] Score history (tracking changes over time)

@@ -251,6 +251,15 @@ BACKTEST = {
     # this gap to displace it. Reduces turnover and cost drag.
     # 0.0 = pure top-N every month; 5.0 = mild stickiness; 10.0 = strong.
     "stickiness_bonus_pts": 5.0,
+    # Regime filter — go to cash when SPY trades below its long MA.
+    # Classic trend-following rule. Default OFF: empirically (60-month sweep)
+    # the filter eats more alpha from SPY 200d-MA whipsaws (2022-23) than it
+    # saves in drawdown — it underperformed across all four universes when ON,
+    # and made MDD worse on US_LARGE (-23% → -33%) and GROWTH_TECH (-46% → -60%).
+    # Kept as an option (--regime-filter not exposed yet, but flip the default)
+    # since longer windows or different universes might tell a different story.
+    "regime_filter_enabled": False,
+    "regime_ma_window":      200,
     # Universes used in --sweep when no explicit list is provided
     "sweep_universes": ["US_LARGE", "EU_LARGE", "GROWTH_TECH", "SEMICONDUCTORS"],
     # Deploy verdict — multi-criteria readout, NOT financial advice.

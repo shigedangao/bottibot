@@ -133,6 +133,7 @@ def run_backtest(
     concurrency: int = 5,
     cost_per_side_bps: float | None = None,
     stickiness_bonus_pts: float | None = None,
+    regime_filter: bool | None = None,
     label: str | None = None,
     verbose: bool = True,
 ) -> dict:
@@ -142,20 +143,29 @@ def run_backtest(
     Applies a per-side transaction cost (commission + slippage) on each rebalance,
     proportional to actual turnover. Stickiness gives currently-held positions
     a score bonus during sorting so a challenger must beat them by that gap to
-    take their slot — reduces churn.
+    take their slot — reduces churn. Regime filter forces cash when the
+    benchmark trades below its long moving average.
     """
     if cost_per_side_bps is None:
         cost_per_side_bps = BACKTEST["cost_per_side_bps"]
     if stickiness_bonus_pts is None:
         stickiness_bonus_pts = BACKTEST["stickiness_bonus_pts"]
+    if regime_filter is None:
+        regime_filter = BACKTEST["regime_filter_enabled"]
+    regime_ma_window = BACKTEST["regime_ma_window"]
 
     if verbose:
         title = label or "Backtest"
+        regime_line = (
+            f"Regime filter: cash when {benchmark_ticker} < {regime_ma_window}d MA"
+            if regime_filter else "Regime filter: OFF"
+        )
         console.print(Panel(
             f"[bold cyan]📊 {title}[/bold cyan]\n"
             f"Universe: {len(tickers)} tickers | Hold top {top_n} | Lookback: {lookback_months} months\n"
             f"Cost: {cost_per_side_bps:.0f} bps/side ({cost_per_side_bps*2:.0f} bps round-trip on full rotation)\n"
-            f"Stickiness: +{stickiness_bonus_pts:.1f} pts to currently-held positions",
+            f"Stickiness: +{stickiness_bonus_pts:.1f} pts to currently-held positions\n"
+            f"{regime_line}",
             expand=False,
         ))
 
@@ -228,9 +238,14 @@ def run_backtest(
         bench_entry_idx = bench_df.index.get_indexer([entry_date], method="nearest")[0]
         bench_slice = bench_df.iloc[:bench_entry_idx + 1]
 
+        # Regime check: if SPY trades below its long MA, force cash this period.
+        regime_risk_off = False
+        if regime_filter and len(bench_slice) >= regime_ma_window:
+            ma_long = bench_slice["close"].iloc[-regime_ma_window:].mean()
+            regime_risk_off = bench_slice["close"].iloc[-1] < ma_long
+
         scored: list[tuple[str, float, float, float]] = []  # (ticker, score, entry_price, exit_price)
         for ticker, df in ticker_dfs.items():
-            # Align entry date to this ticker's trading days
             entry_idx_arr = df.index.get_indexer([entry_date], method="nearest")
             exit_idx_arr = df.index.get_indexer([exit_date], method="nearest")
             if len(entry_idx_arr) == 0 or len(exit_idx_arr) == 0:
@@ -246,33 +261,34 @@ def run_backtest(
             exit_price = df["close"].iloc[exit_idx]
             scored.append((ticker, score, entry_price, exit_price))
 
-        if not scored:
+        if not scored and not regime_risk_off:
             continue
 
         # Pick top N — currently-held positions get a stickiness bonus so a
         # challenger must beat them by more than `stickiness_bonus_pts` to displace.
-        def _adjusted(item: tuple) -> float:
-            return item[1] + (stickiness_bonus_pts if item[0] in prev_picks else 0.0)
-        scored.sort(key=_adjusted, reverse=True)
-        picks = scored[:top_n]
-
-        # Equal-weight portfolio return for this period (gross)
-        returns = [(p[3] / p[2] - 1) for p in picks if p[2] > 0]
-        if not returns:
-            continue
-        period_return_gross = float(np.mean(returns))
-
-        # Transaction cost on actual turnover.
-        # First period = initial buy from cash (one-sided cost on full top_n).
-        # Subsequent periods = sell+buy on the changed fraction (two-sided).
-        new_picks = set(p[0] for p in picks)
-        if not prev_picks:
-            buy_fraction = 1.0
-            sell_fraction = 0.0
+        # When regime_risk_off, picks = [] (full cash).
+        if regime_risk_off:
+            picks: list[tuple[str, float, float, float]] = []
+            period_return_gross = 0.0
         else:
-            n_changed = len(new_picks - prev_picks)
-            buy_fraction = n_changed / top_n
-            sell_fraction = n_changed / top_n
+            def _adjusted(item: tuple) -> float:
+                return item[1] + (stickiness_bonus_pts if item[0] in prev_picks else 0.0)
+            scored.sort(key=_adjusted, reverse=True)
+            picks = scored[:top_n]
+
+            returns = [(p[3] / p[2] - 1) for p in picks if p[2] > 0]
+            if not returns:
+                continue
+            period_return_gross = float(np.mean(returns))
+
+        # Transaction cost on actual changes between previous and new holdings.
+        # Generalized formula handles all transitions (initial buy, normal rebalance,
+        # going to cash, coming back from cash). top_n is the equal-weight denominator.
+        new_picks = set(p[0] for p in picks)
+        n_added   = len(new_picks - prev_picks)
+        n_removed = len(prev_picks - new_picks)
+        buy_fraction  = n_added   / top_n
+        sell_fraction = n_removed / top_n
         cost = (buy_fraction + sell_fraction) * cost_per_side_bps / 10_000.0
         period_return_net = period_return_gross - cost
         prev_picks = new_picks
@@ -290,11 +306,12 @@ def run_backtest(
         periods.append({
             "entry_date": entry_date.strftime("%Y-%m-%d"),
             "exit_date": exit_date.strftime("%Y-%m-%d"),
-            "picks": [p[0] for p in picks],
+            "picks": [p[0] for p in picks] if picks else ["CASH"],
+            "regime": "RISK_OFF" if regime_risk_off else "RISK_ON",
             "portfolio_return_gross": period_return_gross,
             "portfolio_return_net":   period_return_net,
             "cost":                   cost,
-            "turnover":               (buy_fraction + sell_fraction) / 2.0,  # 0-1, one-sided
+            "turnover":               (buy_fraction + sell_fraction) / 2.0,
             "benchmark_return":       bench_period_return,
             "portfolio_value_net":    portfolio_value_net,
             "benchmark_value":        bench_value,
@@ -351,12 +368,18 @@ def run_backtest(
     # Win rate (beating benchmark, net of costs)
     win_rate = float((excess_returns_net > 0).mean())
 
+    # Regime stats
+    n_cash_periods = sum(1 for p in periods if p.get("regime") == "RISK_OFF")
+    pct_in_cash = n_cash_periods / n_periods if n_periods else 0.0
+
     results = {
         "label":                  label or "Backtest",
         "n_periods":              n_periods,
         "years":                  round(years, 2),
         "cost_per_side_bps":      cost_per_side_bps,
         "stickiness_bonus_pts":   stickiness_bonus_pts,
+        "regime_filter":          regime_filter,
+        "pct_in_cash":            pct_in_cash,
         "total_return_gross":     total_return_gross,
         "total_return_net":       total_return_net,
         "cagr_gross":             cagr_gross,
@@ -439,6 +462,8 @@ def _print_results(r: dict):
     summary.add_row("Avg Turnover/mo",     f"{r['avg_turnover']*100:.0f}%",       "")
     summary.add_row("Cost / side",         f"{r['cost_per_side_bps']:.0f} bps",   "")
     summary.add_row("Stickiness",          f"+{r['stickiness_bonus_pts']:.1f} pts", "")
+    summary.add_row("Regime filter",       f"{'ON' if r['regime_filter'] else 'OFF'}", "")
+    summary.add_row("% time in cash",      f"{r['pct_in_cash']*100:.0f}%", "")
 
     console.print(summary)
 
@@ -465,12 +490,14 @@ def run_sweep(
     concurrency: int,
     cost_per_side_bps: float,
     stickiness_bonus_pts: float,
+    regime_filter: bool,
 ) -> dict[str, dict]:
     """Run the backtest across several universes and print a comparison."""
     console.print(Panel(
         f"[bold cyan]🔁 Backtest sweep[/bold cyan]\n"
         f"Universes: {', '.join(universe_names)}\n"
-        f"Hold top {top_n} | {lookback_months} months | cost {cost_per_side_bps:.0f} bps/side | stickiness +{stickiness_bonus_pts:.1f} pts",
+        f"Hold top {top_n} | {lookback_months} months | cost {cost_per_side_bps:.0f} bps/side | "
+        f"stickiness +{stickiness_bonus_pts:.1f} pts | regime filter {'ON' if regime_filter else 'OFF'}",
         expand=False,
     ))
 
@@ -485,6 +512,7 @@ def run_sweep(
             concurrency=concurrency,
             cost_per_side_bps=cost_per_side_bps,
             stickiness_bonus_pts=stickiness_bonus_pts,
+            regime_filter=regime_filter,
             label=name,
             verbose=False,
         )
@@ -495,7 +523,8 @@ def run_sweep(
                 f"vs SPY {r['benchmark_cagr']*100:+.1f}%  "
                 f"alpha {r['alpha_net']*100:+.1f}%  "
                 f"win {r['win_rate']*100:.0f}%  "
-                f"turnover {r['avg_turnover']*100:.0f}%/mo"
+                f"turnover {r['avg_turnover']*100:.0f}%/mo  "
+                f"cash {r['pct_in_cash']*100:.0f}%"
             )
         else:
             console.print(f"  [red]No result[/red]")
@@ -513,6 +542,7 @@ def run_sweep(
     table.add_column("MDD", justify="right")
     table.add_column("Win", justify="right")
     table.add_column("Turn./mo", justify="right")
+    table.add_column("Cash", justify="right")
     table.add_column("Deploy?", justify="center")
 
     for name, r in sorted(results.items(), key=lambda kv: kv[1]["alpha_net"], reverse=True):
@@ -528,6 +558,7 @@ def run_sweep(
             f"{r['max_drawdown']*100:.1f}%",
             f"[{win_color}]{r['win_rate']*100:.0f}%[/{win_color}]",
             f"{r['avg_turnover']*100:.0f}%",
+            f"{r['pct_in_cash']*100:.0f}%",
             f"[{vcolor}]{verdict}[/{vcolor}]",
         )
     console.print()
@@ -564,6 +595,12 @@ if __name__ == "__main__":
     parser.add_argument("--stickiness", type=float, default=BACKTEST["stickiness_bonus_pts"],
                         help=f"Score bonus for currently-held positions during sort, in score points "
                              f"(default {BACKTEST['stickiness_bonus_pts']:.1f}). 0 = pure top-N every month.")
+    parser.add_argument("--regime-filter", dest="regime_filter", action="store_true",
+                        help=f"Enable the SPY {BACKTEST['regime_ma_window']}d MA regime filter "
+                             f"(go to cash when SPY < MA). Off by default — see README for why.")
+    parser.add_argument("--no-regime-filter", dest="regime_filter", action="store_false",
+                        help="Disable the regime filter explicitly.")
+    parser.set_defaults(regime_filter=BACKTEST["regime_filter_enabled"])
     parser.add_argument("--sweep", nargs="*", default=None,
                         help=f"Run across multiple universes. Empty = config default "
                              f"({', '.join(BACKTEST['sweep_universes'])}). "
@@ -584,6 +621,7 @@ if __name__ == "__main__":
             concurrency=args.concurrency,
             cost_per_side_bps=args.cost_bps,
             stickiness_bonus_pts=args.stickiness,
+            regime_filter=args.regime_filter,
         )
     else:
         if args.tickers:
@@ -604,5 +642,6 @@ if __name__ == "__main__":
             concurrency=args.concurrency,
             cost_per_side_bps=args.cost_bps,
             stickiness_bonus_pts=args.stickiness,
+            regime_filter=args.regime_filter,
             label=label,
         )
