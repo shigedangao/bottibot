@@ -18,13 +18,35 @@ from main import analyze_ticker, run_screener
 from bot.storage import load_latest, save_latest
 
 
+FUNDAMENTAL_DEFINITIONS = {
+    "Name":             "Company legal name.",
+    "Sector":           "GICS sector classification.",
+    "Market Cap":       "Total share value = price × outstanding shares.",
+    "P/E":              "Price / trailing 12-month earnings. Lower = cheaper vs current profits; negative or N/A means losses.",
+    "PEG":              "P/E divided by earnings growth rate. <1 = priced low for its growth, >3 = expensive even after growth.",
+    "P/B":              "Price / book value. <1 = trading below net assets, >3 = significant premium to book.",
+    "Gross Margin":     "(Revenue − COGS) / Revenue. Pricing power and product economics.",
+    "EBITDA Margin":    "EBITDA / Revenue. Profitability before financing & tax — useful for cross-country comparisons.",
+    "Operating Margin": "Operating income / Revenue. Profit from core operations after running costs.",
+    "ROE":              "Return on Equity = Net income / Shareholder equity. How efficiently equity capital generates profit.",
+    "Revenue Growth":   "Year-over-year change in revenue. Top-line momentum.",
+    "Earnings Growth":  "Year-over-year change in earnings. Bottom-line momentum.",
+    "D/E":              "Debt / Equity. Financial leverage; >100% means debt exceeds equity.",
+    "Current Ratio":    "Short-term assets / short-term liabilities. >1 = can cover near-term obligations.",
+    "Quality Score":    "Aggregated profitability score (gross/operating margin, ROE) vs sector benchmark.",
+    "Growth Score":     "Aggregated growth score (revenue + earnings) vs sector expectations.",
+    "Value Score":      "Aggregated valuation score (P/E, PEG) vs sector — lower P/E gets a better score.",
+    "Health Score":     "Aggregated balance-sheet score (D/E, current ratio, free cash flow).",
+}
+
+
 def _build_price_chart(df, ticker):
-    """Construit un graphique de prix avec EMA + volume."""
+    """Build a candlestick price chart with EMA overlays."""
     fig = go.Figure()
 
     fig.add_trace(go.Candlestick(
         x=df.index, open=df["open"], high=df["high"],
-        low=df["low"], close=df["close"], name="Prix",
+        low=df["low"], close=df["close"], name="Price",
     ))
 
     fig.add_trace(go.Scatter(x=df.index, y=df["ema20"],  mode="lines",
@@ -37,7 +59,7 @@ def _build_price_chart(df, ticker):
     fig.update_layout(
         title=ticker,
         xaxis_title="Date",
-        yaxis_title="Prix",
+        yaxis_title="Price",
         xaxis_rangeslider_visible=False,
         height=450,
     )
@@ -65,39 +87,39 @@ st.markdown("""
 
 # ── Sidebar ───────────────────────────────────────────────────
 with st.sidebar:
-    st.title("⚙️ Paramètres")
+    st.title("⚙️ Settings")
 
     universe_choice = st.selectbox(
-        "Univers",
-        options=["Personnalisé"] + list(UNIVERSES.keys()),
+        "Universe",
+        options=["Custom"] + list(UNIVERSES.keys()),
         index=0,
     )
 
-    if universe_choice == "Personnalisé":
+    if universe_choice == "Custom":
         custom_tickers = st.text_area(
-            "Tickers (un par ligne ou séparés par virgules)",
+            "Tickers (one per line or comma-separated)",
             value="AAPL\nMSFT\nNVDA\nGOOGL\nMETA\nAMZN\nTSLA\nAVGO\nAMD",
             height=200,
         )
         tickers = [t.strip().upper() for t in custom_tickers.replace(",", "\n").split("\n") if t.strip()]
     else:
         tickers = UNIVERSES[universe_choice]
-        st.info(f"{len(tickers)} actions dans cet univers")
+        st.info(f"{len(tickers)} stocks in this universe")
 
-    top_n = st.slider("Top N à afficher", min_value=5, max_value=30, value=15)
-
-    st.divider()
-
-    run_button = st.button("🚀 Lancer l'analyse", type="primary", use_container_width=True)
+    top_n = st.slider("Top N to display", min_value=5, max_value=30, value=15)
 
     st.divider()
-    st.caption("Données via Yahoo Finance (différé 15min)")
-    st.caption(f"Mis à jour : {datetime.now().strftime('%d/%m %H:%M')}")
+
+    run_button = st.button("🚀 Run analysis", type="primary", use_container_width=True)
+
+    st.divider()
+    st.caption("Data via Yahoo Finance (15-min delayed)")
+    st.caption(f"Updated: {datetime.now().strftime('%d/%m %H:%M')}")
 
 
 # ── Main ──────────────────────────────────────────────────────
 st.title("📊 Stock Analyzer")
-st.caption("Screener technique + fondamental — aide à la décision (pas un conseil financier)")
+st.caption("Technical + fundamental screener — decision support (not financial advice)")
 
 # ── VIX Regime Banner ────────────────────────────────────────
 vix_data = fetch_vix()
@@ -121,12 +143,12 @@ if vix_level:
 else:
     vix_regime = None
 
-# Charger les résultats existants si disponibles (local FS or GCS)
+# Load cached results if available (local FS or GCS)
 results_cache = load_latest() or []
 if results_cache:
-    st.info(f"📂 Dernière analyse chargée ({len(results_cache)} actions analysées)")
+    st.info(f"📂 Loaded last analysis ({len(results_cache)} stocks)")
 
-# Lancer une nouvelle analyse
+# Run a fresh analysis
 if run_button:
     concurrency = 5
     with st.spinner(f"Analyzing {len(tickers)} stocks (concurrency={concurrency})..."):
@@ -155,43 +177,43 @@ if run_button:
         progress_bar.empty()
     st.success(f"✅ {len(results_cache)} stocks analyzed successfully!")
 
-# Afficher les résultats
+# Display results
 if results_cache:
     top_results = results_cache[:top_n]
 
-    # ── Métriques globales ────────────────────────────────────
+    # ── Global metrics ────────────────────────────────────────
     col1, col2, col3, col4 = st.columns(4)
     scores = [r["score"] for r in results_cache]
-    buy_signals = [r for r in results_cache if r["recommendation"] in ("FORT ACHAT", "ACHAT")]
+    buy_signals = [r for r in results_cache if r["recommendation"] in ("STRONG BUY", "BUY")]
 
-    col1.metric("Actions analysées",    len(results_cache))
-    col2.metric("Signaux d'achat",       len(buy_signals))
-    col3.metric("Score moyen",           f"{sum(scores)/len(scores):.1f}/100")
-    col4.metric("Meilleur score",        f"{max(scores):.1f}/100 — {results_cache[0]['ticker']}")
+    col1.metric("Stocks analyzed", len(results_cache))
+    col2.metric("Buy signals",     len(buy_signals))
+    col3.metric("Average score",   f"{sum(scores)/len(scores):.1f}/100")
+    col4.metric("Best score",      f"{max(scores):.1f}/100 — {results_cache[0]['ticker']}")
 
     st.divider()
 
-    # ── Onglets ───────────────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs(["🏆 Classement", "📈 Graphiques", "🔍 Analyse détaillée"])
+    # ── Tabs ──────────────────────────────────────────────────
+    tab1, tab2, tab3 = st.tabs(["🏆 Ranking", "📈 Charts", "🔍 Detailed analysis"])
 
     with tab1:
-        # Tableau principal
+        # Main table
         df_display = pd.DataFrame([{
-            "Rang":         i + 1,
-            "Ticker":       r["ticker"],
-            "Nom":          r["name"][:30],
-            "Secteur":      r.get("sector", "")[:20],
-            "Prix":         f"{r['price']:,.2f}",
-            "Score":        r["score"],
-            "Signal":       f"{r['emoji']} {r['recommendation']}",
-            "Potentiel":    "🌱" if r.get("emerging_potential") else "",
-            "Mom 10j":      f"{r['momentum_10d']:+.1f}%",
-            "Mom 60j":      f"{r['momentum_60d']:+.1f}%",
-            "RSI":          r["rsi"],
-            "EMA align.":   "✅" if r.get("ema_aligned") else "❌",
-            "SL suggéré":   f"{r['stop_loss_pct']}%",
-            "TP suggéré":   f"+{r['take_profit_pct']}%",
-            "R/R":          f"{r['rr_ratio']}:1",
+            "Rank":       i + 1,
+            "Ticker":     r["ticker"],
+            "Name":       r["name"][:30],
+            "Sector":     r.get("sector", "")[:20],
+            "Price":      f"{r['price']:,.2f}",
+            "Score":      r["score"],
+            "Signal":     f"{r['emoji']} {r['recommendation']}",
+            "Potential":  "🌱" if r.get("emerging_potential") else "",
+            "Mom 10d":    f"{r['momentum_10d']:+.1f}%",
+            "Mom 60d":    f"{r['momentum_60d']:+.1f}%",
+            "RSI":        r["rsi"],
+            "EMA align.": "✅" if r.get("ema_aligned") else "❌",
+            "SL":         f"{r['stop_loss_pct']}%",
+            "TP":         f"+{r['take_profit_pct']}%",
+            "R/R":        f"{r['rr_ratio']}:1",
         } for i, r in enumerate(top_results)])
 
         st.dataframe(
@@ -205,8 +227,8 @@ if results_cache:
             }
         )
 
-        # Cards pour le top 5
-        st.subheader("🌟 Top 5 — Détail")
+        # Cards for the top 5
+        st.subheader("🌟 Top 5 — Detail")
         cols = st.columns(5)
         for i, (col, r) in enumerate(zip(cols, top_results[:5])):
             with col:
@@ -237,20 +259,20 @@ if results_cache:
         col1, col2 = st.columns(2)
 
         with col1:
-            # Distribution des scores
+            # Score distribution
             fig_hist = px.histogram(
                 x=[r["score"] for r in results_cache],
                 nbins=20,
-                title="Distribution des scores",
-                labels={"x": "Score", "y": "Nombre d'actions"},
+                title="Score distribution",
+                labels={"x": "Score", "y": "Number of stocks"},
                 color_discrete_sequence=["#4f8ef7"],
             )
-            fig_hist.add_vline(x=62, line_dash="dash", line_color="green", annotation_text="Achat")
-            fig_hist.add_vline(x=75, line_dash="dash", line_color="lime",  annotation_text="Fort achat")
+            fig_hist.add_vline(x=62, line_dash="dash", line_color="green", annotation_text="Buy")
+            fig_hist.add_vline(x=75, line_dash="dash", line_color="lime",  annotation_text="Strong Buy")
             st.plotly_chart(fig_hist, use_container_width=True)
 
         with col2:
-            # Répartition par secteur (top actions)
+            # Sector breakdown of top stocks
             sectors = {}
             for r in top_results:
                 s = r.get("sector", "Unknown")
@@ -258,17 +280,17 @@ if results_cache:
             fig_pie = px.pie(
                 values=list(sectors.values()),
                 names=list(sectors.keys()),
-                title=f"Secteurs dans le Top {top_n}",
+                title=f"Sectors in the Top {top_n}",
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-        # Scatter Score vs Momentum 60j
+        # Score vs 60d momentum scatter
         fig_scatter = px.scatter(
             x=[r["momentum_60d"] for r in results_cache],
             y=[r["score"] for r in results_cache],
             text=[r["ticker"] for r in results_cache],
-            title="Score vs Momentum 60j",
-            labels={"x": "Momentum 60j (%)", "y": "Score"},
+            title="Score vs 60d Momentum",
+            labels={"x": "60d Momentum (%)", "y": "Score"},
             color=[r["score"] for r in results_cache],
             color_continuous_scale="RdYlGn",
         )
@@ -277,7 +299,7 @@ if results_cache:
 
     with tab3:
         ticker_choice = st.selectbox(
-            "Sélectionne une action",
+            "Select a stock",
             options=[r["ticker"] for r in top_results],
             format_func=lambda t: f"{t} — {next(r['name'] for r in top_results if r['ticker'] == t)}"
         )
@@ -287,7 +309,7 @@ if results_cache:
             col1, col2 = st.columns([2, 1])
 
             with col1:
-                # Graphique des prix avec indicateurs
+                # Price chart with indicators
                 df = fetch_ohlcv(ticker_choice, period="1y")
                 if df is not None:
                     df = compute_indicators(df)
@@ -296,7 +318,7 @@ if results_cache:
 
             with col2:
                 st.subheader(f"📋 {selected['ticker']}")
-                st.metric("Score global", f"{selected['score']:.1f}/100")
+                st.metric("Overall score", f"{selected['score']:.1f}/100")
                 st.metric("Signal", f"{selected['emoji']} {selected['recommendation']}")
 
                 if selected.get("emerging_potential"):
@@ -304,39 +326,53 @@ if results_cache:
                     for sig in selected.get("emerging_signal_reasons", []):
                         st.markdown(f"- {sig}")
 
-                # Décomposition du score
-                st.subheader("Décomposition du score")
+                # Score breakdown
+                st.subheader("Score breakdown")
                 detail = selected.get("score_detail", {})
                 for k, v in detail.items():
                     st.progress(v / 25, text=f"{k.capitalize()}: {v:.1f}/25")
 
-                # Raisons
-                st.subheader("Analyse")
+                # Analysis reasons
+                st.subheader("Analysis")
                 for reason in selected.get("reasons", []):
                     st.write(reason)
 
-                # Fondamentaux
-                st.subheader("Données fondamentales")
+                # Fundamentals
+                st.subheader("Fundamental data")
                 fund = selected.get("fundamentals_display", {})
-                df_fund = pd.DataFrame(list(fund.items()), columns=["Métrique", "Valeur"])
-                st.dataframe(df_fund, use_container_width=True, hide_index=True)
+                df_fund = pd.DataFrame([
+                    {
+                        "Metric":     k,
+                        "Value":      v,
+                        "Definition": FUNDAMENTAL_DEFINITIONS.get(k, ""),
+                    }
+                    for k, v in fund.items()
+                ])
+                st.dataframe(
+                    df_fund,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Definition": st.column_config.TextColumn(width="large"),
+                    },
+                )
 
 else:
-    st.info("👆 Configure l'univers dans la sidebar et lance une analyse pour commencer.")
+    st.info("👆 Pick a universe in the sidebar and run an analysis to get started.")
     st.markdown("""
-    ### Comment ça marche ?
-    1. **Choisis un univers** d'actions dans la sidebar
-    2. **Lance l'analyse** — le screener va calculer les scores pour chaque action
-    3. **Consulte le classement** — les actions sont triées par score de 0 à 100
-    4. **Explore en détail** — graphiques, fondamentaux, stop-loss suggérés
+    ### How it works
+    1. **Pick a universe** in the sidebar
+    2. **Run the analysis** — the screener computes a score for each stock
+    3. **Read the ranking** — stocks sorted by score from 0 to 100
+    4. **Drill in** — charts, fundamentals, suggested stop-loss
 
-    ### Méthode de scoring
-    | Composante | Poids | Ce qu'on mesure |
+    ### Scoring method
+    | Component | Weight | What it measures |
     |---|---|---|
-    | Momentum | 25% | Performance récente (10j, 60j, 120j) |
-    | Tendance EMA | 25% | Structure haussière/baissière |
-    | Fondamentaux | 20% | EBITDA, croissance, santé financière |
-    | Qualité | 10% | Marges, ROE, profitabilité |
-    | RSI | 10% | Ni suracheté ni survendu |
-    | Volume | 10% | Confirmation des mouvements |
+    | Momentum | 25% | Recent performance (10d, 60d, 120d) |
+    | EMA trend | 25% | Bullish / bearish structure |
+    | Fundamentals | 20% | EBITDA, growth, financial health |
+    | Quality | 10% | Margins, ROE, profitability |
+    | RSI | 10% | Neither overbought nor oversold |
+    | Volume | 10% | Confirms the move |
     """)

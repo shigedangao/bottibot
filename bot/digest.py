@@ -13,7 +13,7 @@ from config import UNIVERSES
 from main import run_screener
 from bot.storage import save_snapshot, load_previous_snapshot
 
-BUY_SIGNALS = {"FORT ACHAT", "ACHAT"}
+BUY_SIGNALS = {"STRONG BUY", "BUY"}
 SCORE_MOVE_THRESHOLD = 5.0  # absolute score points
 
 

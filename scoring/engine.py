@@ -98,21 +98,21 @@ def compute_final_score(
 def _get_recommendation(score: float, tech: dict, fund: dict) -> tuple[str, str, str]:
     """Détermine la recommandation textuelle."""
 
-    # Cas particuliers
+    # Special case: overbought + decent score → "WATCH"
     if tech.get("rsi_value", 50) > TECHNICAL["rsi_overbought"]:
         if score > 65:
-            return "SURVEILLER", "orange", "👀"
+            return "WATCH", "orange", "👀"
 
     if score >= 75:
-        return "FORT ACHAT",   "green",  "🟢"
+        return "STRONG BUY", "green",      "🟢"
     elif score >= 62:
-        return "ACHAT",        "lightgreen", "📈"
+        return "BUY",        "lightgreen", "📈"
     elif score >= 50:
-        return "NEUTRE",       "gray",   "⚪"
+        return "NEUTRAL",    "gray",       "⚪"
     elif score >= 38:
-        return "PRUDENCE",     "orange", "🟡"
+        return "CAUTION",    "orange",     "🟡"
     else:
-        return "ÉVITER",       "red",    "🔴"
+        return "AVOID",      "red",        "🔴"
 
 
 def _build_reasons(tech: dict, fund: dict, fundamentals: dict) -> list[str]:

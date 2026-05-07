@@ -206,12 +206,12 @@ def _print_results_table(results: list[dict]):
     table.add_column("R/R",     justify="right", width=6)
 
     colors = {
-        "FORT ACHAT":  "bright_green",
-        "ACHAT":       "green",
-        "NEUTRE":      "white",
-        "SURVEILLER":  "yellow",
-        "PRUDENCE":    "yellow",
-        "ÉVITER":      "red",
+        "STRONG BUY": "bright_green",
+        "BUY":        "green",
+        "NEUTRAL":    "white",
+        "WATCH":      "yellow",
+        "CAUTION":    "yellow",
+        "AVOID":      "red",
     }
 
     for i, r in enumerate(results, 1):
