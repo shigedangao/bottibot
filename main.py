@@ -1,6 +1,5 @@
 # main.py — Point d'entrée du Stock Analyzer
 
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from rich.console import Console
@@ -18,6 +17,7 @@ from analysis.technical import compute_indicators, get_technical_signals
 from analysis.fundamental import get_fundamental_signals, format_fundamentals_display
 from analysis.potential import detect_emerging_potential, format_potential_reasons
 from scoring.engine import compute_final_score, rank_stocks
+from bot.storage import save_latest
 
 console = Console()
 
@@ -177,10 +177,8 @@ def run_screener(
     # Afficher le tableau des résultats
     _print_results_table(ranked[:top_n])
 
-    # Sauvegarder les résultats
-    output_path = "results_latest.json"
-    with open(output_path, "w") as f:
-        json.dump(ranked, f, indent=2, default=str)
+    # Persist latest results (local FS or GCS depending on BOTTIBOT_STORAGE_BACKEND)
+    output_path = save_latest(ranked)
     console.print(f"\n[dim]💾 Results saved to {output_path}[/dim]")
 
     return ranked

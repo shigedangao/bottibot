@@ -99,6 +99,116 @@ Daily snapshots are written to `.snapshots/results_YYYY-MM-DD.json` so the next 
 
 ---
 
+## Deploy on GCP (Cloud Run)
+
+The same Docker image powers two Cloud Run targets:
+
+- **Cloud Run Service** — Streamlit dashboard (long-running HTTP)
+- **Cloud Run Job** — daily Telegram digest (cron-triggered via Cloud Scheduler)
+
+Snapshots are persisted to **Google Cloud Storage** so the digest job can diff against yesterday and the dashboard can read the morning's pre-computed results.
+
+### One-time setup
+
+```bash
+# Replace with your values
+export PROJECT_ID=your-gcp-project
+export REGION=europe-west1
+export BUCKET=bottibot-snapshots-${PROJECT_ID}
+export REPO=bottibot
+export IMAGE=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/bottibot:latest
+
+# Enable APIs
+gcloud services enable run.googleapis.com cloudscheduler.googleapis.com \
+    artifactregistry.googleapis.com secretmanager.googleapis.com \
+    storage.googleapis.com --project=${PROJECT_ID}
+
+# Artifact Registry repo
+gcloud artifacts repositories create ${REPO} --repository-format=docker \
+    --location=${REGION} --project=${PROJECT_ID}
+
+# GCS bucket for snapshots
+gcloud storage buckets create gs://${BUCKET} --location=${REGION} --project=${PROJECT_ID}
+
+# Telegram secrets
+echo -n "$TELEGRAM_BOT_TOKEN" | gcloud secrets create telegram-bot-token --data-file=- --project=${PROJECT_ID}
+echo -n "$TELEGRAM_CHAT_ID"   | gcloud secrets create telegram-chat-id   --data-file=- --project=${PROJECT_ID}
+```
+
+### Build & push the image
+
+```bash
+gcloud builds submit --tag ${IMAGE} --project=${PROJECT_ID}
+```
+
+### Deploy the dashboard (Cloud Run Service)
+
+```bash
+gcloud run deploy bottibot-dashboard \
+    --image=${IMAGE} \
+    --region=${REGION} \
+    --project=${PROJECT_ID} \
+    --allow-unauthenticated \
+    --memory=1Gi \
+    --concurrency=10 \
+    --min-instances=0 \
+    --max-instances=2 \
+    --set-env-vars=BOTTIBOT_STORAGE_BACKEND=gcs,BOTTIBOT_GCS_BUCKET=${BUCKET}
+```
+
+> Drop `--allow-unauthenticated` if you'd rather keep the dashboard private (auth via IAM).
+
+### Deploy the digest (Cloud Run Job + Scheduler)
+
+```bash
+gcloud run jobs create bottibot-digest \
+    --image=${IMAGE} \
+    --region=${REGION} \
+    --project=${PROJECT_ID} \
+    --memory=1Gi \
+    --task-timeout=600 \
+    --set-env-vars=BOTTIBOT_STORAGE_BACKEND=gcs,BOTTIBOT_GCS_BUCKET=${BUCKET} \
+    --set-secrets=TELEGRAM_BOT_TOKEN=telegram-bot-token:latest,TELEGRAM_CHAT_ID=telegram-chat-id:latest \
+    --command=uv \
+    --args=run,python,-m,bot.telegram,--universe,US_LARGE,--top,5
+
+# Trigger daily at 07:00 Europe/Paris
+gcloud scheduler jobs create http bottibot-digest-daily \
+    --location=${REGION} \
+    --project=${PROJECT_ID} \
+    --schedule="0 7 * * *" \
+    --time-zone="Europe/Paris" \
+    --uri="https://${REGION}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${PROJECT_ID}/jobs/bottibot-digest:run" \
+    --http-method=POST \
+    --oauth-service-account-email="$(gcloud iam service-accounts list --filter='displayName:Compute Engine default service account' --format='value(email)' --project=${PROJECT_ID})"
+```
+
+### Storage backend env vars
+
+The same code paths run locally and on GCP — only the env vars change:
+
+| Variable                       | Default              | Purpose                                              |
+|--------------------------------|----------------------|------------------------------------------------------|
+| `BOTTIBOT_STORAGE_BACKEND`     | `local`              | Set to `gcs` to persist to Cloud Storage             |
+| `BOTTIBOT_GCS_BUCKET`          | _(required for gcs)_ | GCS bucket name                                      |
+| `BOTTIBOT_GCS_PREFIX`          | `bottibot`           | Object name prefix inside the bucket                 |
+| `BOTTIBOT_SNAPSHOT_DIR`        | `.snapshots`         | Local backend only — directory for daily snapshots   |
+| `BOTTIBOT_LATEST_PATH`         | `results_latest.json`| Local backend only — path to the dashboard cache     |
+
+### Run the container locally
+
+```bash
+# Dashboard
+docker build -t bottibot .
+docker run --rm -p 8080:8080 -e PORT=8080 bottibot
+
+# Digest (uses your local .env)
+docker run --rm --env-file .env bottibot \
+    uv run python -m bot.telegram --universe US_LARGE --top 5
+```
+
+---
+
 ## Structure
 
 ```

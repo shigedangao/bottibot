@@ -4,10 +4,8 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-import json
 import os
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
@@ -17,6 +15,7 @@ from config import UNIVERSES, ALL_TICKERS, DASHBOARD
 from data.fetcher import fetch_ohlcv, fetch_vix
 from analysis.technical import compute_indicators
 from main import analyze_ticker, run_screener
+from bot.storage import load_latest, save_latest
 
 # ── Config Streamlit ──────────────────────────────────────────
 st.set_page_config(
@@ -95,16 +94,10 @@ if vix_level:
 else:
     vix_regime = None
 
-# Charger les résultats existants si disponibles
-results_cache = []
-cache_file = "results_latest.json"
-if os.path.exists(cache_file):
-    try:
-        with open(cache_file) as f:
-            results_cache = json.load(f)
-        st.info(f"📂 Dernière analyse chargée ({len(results_cache)} actions analysées)")
-    except Exception:
-        pass
+# Charger les résultats existants si disponibles (local FS or GCS)
+results_cache = load_latest() or []
+if results_cache:
+    st.info(f"📂 Dernière analyse chargée ({len(results_cache)} actions analysées)")
 
 # Lancer une nouvelle analyse
 if run_button:
@@ -131,8 +124,7 @@ if run_button:
                     results_cache.append(result)
 
         results_cache.sort(key=lambda x: x.get("score", 0), reverse=True)
-        with open(cache_file, "w") as f:
-            json.dump(results_cache, f, indent=2, default=str)
+        save_latest(results_cache)
         progress_bar.empty()
     st.success(f"✅ {len(results_cache)} stocks analyzed successfully!")
 
