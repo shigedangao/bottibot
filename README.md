@@ -387,8 +387,8 @@ Everything is in `config.py`:
 - [x] Multi-universe sweep to stress-test edge across markets
 - [x] Stickiness threshold to throttle turnover and capture continuation
 - [x] Tested SPY 200d MA regime filter — empirically hurt more than it helped, kept as an off-by-default option
+- [x] Score history view in the dashboard (per-ticker time series from the daily snapshots)
 - [ ] Run longer backtests (60+ months) and document the results in this repo
 - [ ] Email/Telegram alerts when a score exceeds a threshold
-- [ ] Score history (tracking changes over time)
 - [ ] Sentiment score (news, Reddit)
 - [ ] Crypto trading bot (Binance spot, paper trading first)

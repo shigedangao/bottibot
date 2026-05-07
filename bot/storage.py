@@ -60,6 +60,20 @@ def _local_load_previous_snapshot(before: date) -> list[dict] | None:
     return None
 
 
+def _local_load_all_snapshots() -> list[tuple[date, list[dict]]]:
+    if not SNAPSHOT_DIR.exists():
+        return []
+    out: list[tuple[date, list[dict]]] = []
+    for path in sorted(SNAPSHOT_DIR.glob("results_*.json")):
+        try:
+            day = date.fromisoformat(path.stem.removeprefix("results_"))
+            results = json.loads(path.read_text())
+            out.append((day, results))
+        except (ValueError, json.JSONDecodeError, OSError):
+            continue
+    return out
+
+
 def _local_save_latest(results: list[dict]) -> str:
     parent = LATEST_PATH.parent
     if str(parent) not in ("", "."):
@@ -132,6 +146,23 @@ def _gcs_load_previous_snapshot(before: date) -> list[dict] | None:
         return None
 
 
+def _gcs_load_all_snapshots() -> list[tuple[date, list[dict]]]:
+    bucket = _gcs_bucket()
+    prefix = f"{GCS_PREFIX}/snapshots/results_"
+    blobs = list(bucket.list_blobs(prefix=prefix))
+    out: list[tuple[date, list[dict]]] = []
+    for b in blobs:
+        stem = b.name.split("/")[-1].removeprefix("results_").removesuffix(".json")
+        try:
+            day = date.fromisoformat(stem)
+            results = json.loads(b.download_as_text())
+            out.append((day, results))
+        except (ValueError, json.JSONDecodeError, Exception):
+            continue
+    out.sort(key=lambda x: x[0])
+    return out
+
+
 def _gcs_save_latest(results: list[dict]) -> str:
     blob = _gcs_blob("results_latest.json")
     blob.upload_from_string(
@@ -186,3 +217,30 @@ def load_latest() -> list[dict] | None:
     if BACKEND == "gcs":
         return _gcs_load_latest()
     return _local_load_latest()
+
+
+def load_all_snapshots() -> list[tuple[date, list[dict]]]:
+    """Return every saved snapshot as (date, results) sorted ascending by date."""
+    if BACKEND == "gcs":
+        return _gcs_load_all_snapshots()
+    return _local_load_all_snapshots()
+
+
+def score_history_for_ticker(ticker: str) -> list[dict]:
+    """
+    Return chronological score history for a single ticker pulled from the
+    daily snapshots. Each entry: {date, score, recommendation, emoji}.
+    Days where the ticker was not screened are simply absent.
+    """
+    history: list[dict] = []
+    for day, results in load_all_snapshots():
+        for r in results:
+            if r.get("ticker") == ticker:
+                history.append({
+                    "date":           day.isoformat(),
+                    "score":          r.get("score"),
+                    "recommendation": r.get("recommendation"),
+                    "emoji":          r.get("emoji"),
+                })
+                break
+    return history

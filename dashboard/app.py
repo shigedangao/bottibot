@@ -15,7 +15,7 @@ from config import UNIVERSES, ALL_TICKERS, DASHBOARD
 from data.fetcher import fetch_ohlcv, fetch_vix
 from analysis.technical import compute_indicators
 from main import analyze_ticker, run_screener
-from bot.storage import load_latest, save_latest
+from bot.storage import load_latest, save_latest, score_history_for_ticker
 
 
 FUNDAMENTAL_DEFINITIONS = {
@@ -38,6 +38,42 @@ FUNDAMENTAL_DEFINITIONS = {
     "Value Score":      "Aggregated valuation score (P/E, PEG) vs sector — lower P/E gets a better score.",
     "Health Score":     "Aggregated balance-sheet score (D/E, current ratio, free cash flow).",
 }
+
+
+def _build_score_history_chart(history: list[dict], ticker: str):
+    """Line chart of score over time with signal-threshold reference lines."""
+    fig = go.Figure()
+
+    dates  = [h["date"]  for h in history]
+    scores = [h["score"] for h in history]
+
+    fig.add_trace(go.Scatter(
+        x=dates, y=scores, mode="lines+markers",
+        name="Score",
+        line=dict(color="#4f8ef7", width=2),
+        marker=dict(size=6),
+        hovertemplate="%{x}<br>Score: %{y:.1f}<extra></extra>",
+    ))
+
+    # Signal threshold reference lines
+    fig.add_hline(y=75, line_dash="dash", line_color="#00c851",
+                  annotation_text="STRONG BUY", annotation_position="right")
+    fig.add_hline(y=62, line_dash="dash", line_color="#5cb85c",
+                  annotation_text="BUY", annotation_position="right")
+    fig.add_hline(y=50, line_dash="dot",  line_color="gray",
+                  annotation_text="NEUTRAL", annotation_position="right")
+    fig.add_hline(y=38, line_dash="dot",  line_color="#ffbb33",
+                  annotation_text="CAUTION", annotation_position="right")
+
+    fig.update_layout(
+        title=f"{ticker} — Score history",
+        xaxis_title="Date",
+        yaxis_title="Score",
+        yaxis=dict(range=[0, 100]),
+        height=320,
+        margin=dict(l=40, r=80, t=40, b=40),
+    )
+    return fig
 
 
 def _build_price_chart(df, ticker):
@@ -315,6 +351,17 @@ if results_cache:
                     df = compute_indicators(df)
                     fig = _build_price_chart(df, ticker_choice)
                     st.plotly_chart(fig, use_container_width=True)
+
+                # Score history (from saved daily snapshots)
+                history = score_history_for_ticker(ticker_choice)
+                if len(history) >= 2:
+                    fig_hist = _build_score_history_chart(history, ticker_choice)
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                else:
+                    st.caption(
+                        "📈 *Score history will appear here once you've saved a few daily snapshots* "
+                        "(automatically generated each time the digest or screener runs)."
+                    )
 
             with col2:
                 st.subheader(f"📋 {selected['ticker']}")
