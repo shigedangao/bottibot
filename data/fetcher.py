@@ -175,6 +175,38 @@ def fetch_fundamentals(ticker: str) -> dict:
     return result
 
 
+def fetch_rd_intensity(ticker: str) -> float | None:
+    """
+    Best-effort R&D / revenue ratio from latest annual income statement.
+    Returns None if the data is not exposed by Yahoo for this ticker.
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        fin = stock.financials
+        if fin is None or fin.empty:
+            return None
+
+        rd_row = None
+        rev_row = None
+        for idx in fin.index:
+            label = str(idx).lower()
+            if rd_row is None and "research" in label and "development" in label:
+                rd_row = idx
+            elif rev_row is None and ("total revenue" in label or label.strip() == "revenue"):
+                rev_row = idx
+
+        if rd_row is None or rev_row is None:
+            return None
+
+        rd = _to_float(fin.loc[rd_row].iloc[0])
+        rev = _to_float(fin.loc[rev_row].iloc[0])
+        if rd is None or rev is None or rev <= 0 or rd < 0:
+            return None
+        return rd / rev
+    except Exception:
+        return None
+
+
 def fetch_batch(tickers: list[str], period: str = "1y", verbose: bool = True) -> dict:
     """
     Fetch OHLCV pour une liste de tickers.

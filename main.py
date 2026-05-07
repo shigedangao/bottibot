@@ -13,9 +13,10 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import ALL_TICKERS, UNIVERSES, DASHBOARD
-from data.fetcher import fetch_ohlcv, fetch_fundamentals, fetch_vix, fetch_benchmark, fetch_earnings_date
+from data.fetcher import fetch_ohlcv, fetch_fundamentals, fetch_vix, fetch_benchmark, fetch_earnings_date, fetch_rd_intensity
 from analysis.technical import compute_indicators, get_technical_signals
 from analysis.fundamental import get_fundamental_signals, format_fundamentals_display
+from analysis.potential import detect_emerging_potential, format_potential_reasons
 from scoring.engine import compute_final_score, rank_stocks
 
 console = Console()
@@ -46,6 +47,10 @@ def analyze_ticker(
 
     # 5. Score final (VIX-adjusted weights)
     score_result = compute_final_score(tech_signals, fund_signals, fundamentals, vix_regime)
+
+    # 5b. Emerging potential — forward-looking badge, separate from the score
+    rd_intensity = fetch_rd_intensity(ticker)
+    potential = detect_emerging_potential(fundamentals, tech_signals, rd_intensity)
 
     # 6. Earnings calendar
     earnings_date = fetch_earnings_date(ticker)
@@ -100,6 +105,11 @@ def analyze_ticker(
         "earnings_date":    earnings_date,
         "earnings_soon":    earnings_soon,
         "days_to_earnings": days_to_earnings,
+        # Emerging potential (forward-looking, not in score)
+        "emerging_potential":         potential["is_emerging"],
+        "emerging_signals":           potential["signals"],
+        "emerging_signal_reasons":    format_potential_reasons(potential["signals"]),
+        "rd_intensity":               potential["rd_intensity"],
         # Fondamentaux formatés
         "fundamentals_display": format_fundamentals_display(fundamentals, fund_signals),
         # Timestamps
@@ -220,6 +230,8 @@ def _print_results_table(results: list[dict]):
         ticker_display = r["ticker"]
         if r.get("earnings_soon"):
             ticker_display += " ⚡"
+        if r.get("emerging_potential"):
+            ticker_display += " 🌱"
 
         table.add_row(
             str(i),
@@ -243,12 +255,23 @@ def _print_results_table(results: list[dict]):
         console.print(f"\n[bold yellow]⚡ Earnings within 7 days:[/bold yellow] "
                       + ", ".join(f"{r['ticker']} ({r['earnings_date']})" for r in earnings_tickers))
 
+    # Show emerging potential candidates
+    emerging = [r for r in results if r.get("emerging_potential")]
+    if emerging:
+        console.print(f"\n[bold green]🌱 Emerging potential ({len(emerging)}):[/bold green] "
+                      + ", ".join(r["ticker"] for r in emerging))
+        console.print("[dim]   Forward-looking tag, not part of the score — worth a closer look.[/dim]")
+
     # Top 3 detail
     console.print("\n[bold]💡 Top 3 detailed analysis:[/bold]")
     for r in results[:3]:
         console.print(f"\n[bold cyan]{r['ticker']}[/bold cyan] — {r['name']}")
         for reason in r.get("reasons", []):
             console.print(f"  {reason}")
+        if r.get("emerging_potential"):
+            console.print(f"  [green]🌱 Emerging potential:[/green]")
+            for sig in r.get("emerging_signal_reasons", []):
+                console.print(f"     {sig}")
         if r.get("earnings_soon"):
             console.print(f"  [yellow]⚡ EARNINGS on {r['earnings_date']} — consider waiting[/yellow]")
 

@@ -211,6 +211,31 @@ VIX = {
 }
 
 # ──────────────────────────────────────────────
+# Emerging potential badge
+# Forward-looking signals — separate tag, NOT folded into the 0-100 score.
+# Awarded when at least `min_signals_required` of the 4 signals fire.
+# ──────────────────────────────────────────────
+EMERGING_POTENTIAL = {
+    "min_signals_required": 2,
+    # Forward earnings step-up: forward_pe < trailing_pe * ratio (or trailing missing/negative)
+    "forward_pe_step_up_ratio": 0.7,
+    "max_forward_pe": 80,                  # ignore bubble forward P/Es
+    # Growth not yet priced in: revenue_growth high, but 60d momentum still weak
+    "min_revenue_growth_priced_out": 0.20,
+    "max_momentum_60d_priced_out": 5.0,    # %
+    # Attractive PEG with growth
+    "max_peg": 1.5,
+    "min_revenue_growth_for_peg": 0.15,
+    # Heavy R&D investment (ASML / pre-EUV pattern). R&D / revenue ratio.
+    "rd_intensity_default": 0.08,
+    "rd_intensity_by_sector": {
+        "Technology":             0.13,
+        "Healthcare":             0.12,
+        "Communication Services": 0.10,
+    },
+}
+
+# ──────────────────────────────────────────────
 # Timeframes d'analyse
 # ──────────────────────────────────────────────
 TIMEFRAMES = {

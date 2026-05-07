@@ -111,7 +111,8 @@ bottibot/
 │   └── fetcher.py         # Yahoo Finance — OHLCV, fundamentals, VIX, earnings
 ├── analysis/
 │   ├── technical.py       # EMA, RSI, MACD, ATR, ADX, momentum, relative strength
-│   └── fundamental.py     # Sector-relative fundamental scoring
+│   ├── fundamental.py     # Sector-relative fundamental scoring
+│   └── potential.py       # Emerging potential badge (forward-looking signals)
 ├── scoring/
 │   └── engine.py          # Composite scoring engine, VIX-adjusted weights
 ├── bot/
@@ -167,6 +168,18 @@ Separates alpha from beta by comparing each stock's 10/20/60-day returns against
 ### Earnings calendar warning
 Detects upcoming earnings within 7 days (`⚡` marker in the results table) so you can avoid opening positions right before a report.
 
+### Emerging potential badge (🌱)
+Forward-looking tag — **separate from the 0-100 score** — flagging companies that may be the next ASML / NVDA before the market fully prices it in. Awarded when at least 2 of these signals fire together:
+
+1. **Forward earnings step-up** — analysts expect a meaningful earnings jump (forward P/E ≪ trailing P/E, or trailing missing/negative)
+2. **Growth not yet priced in** — strong revenue growth (≥20%) but flat/weak 60d price action
+3. **Attractive PEG with growth** — PEG < 1.5 combined with ≥15% revenue growth
+4. **Heavy R&D investment** — R&D / revenue above sector norm (the ASML pre-EUV pattern)
+
+Tag shows as `🌱` next to the ticker in the CLI and the dashboard. Tunable via `EMERGING_POTENTIAL` in `config.py`.
+
+> Intentionally noisy — for every ASML there are 100 misses. Use as a discretionary watchlist, not a buy signal.
+
 ### Sector concentration cap
 Pass `--max-per-sector N` to enforce diversification and prevent the top N being dominated by a single sector.
 
@@ -186,6 +199,7 @@ Everything is in `config.py`:
 - **Adjust thresholds**: edit `FUNDAMENTAL` and `TECHNICAL`
 - **Tune sector benchmarks**: edit `SECTOR_BENCHMARKS`
 - **Tune VIX regime thresholds & weight adjustments**: edit `VIX`
+- **Tune emerging potential thresholds**: edit `EMERGING_POTENTIAL` (R&D intensity by sector, forward step-up ratio, PEG cap, etc.)
 
 ---
 

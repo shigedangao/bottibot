@@ -165,6 +165,7 @@ if results_cache:
             "Prix":         f"{r['price']:,.2f}",
             "Score":        r["score"],
             "Signal":       f"{r['emoji']} {r['recommendation']}",
+            "Potentiel":    "🌱" if r.get("emerging_potential") else "",
             "Mom 10j":      f"{r['momentum_10d']:+.1f}%",
             "Mom 60j":      f"{r['momentum_60d']:+.1f}%",
             "RSI":          r["rsi"],
@@ -192,12 +193,26 @@ if results_cache:
             with col:
                 score = r["score"]
                 css_class = "score-high" if score >= 65 else ("score-mid" if score >= 50 else "score-low")
-                st.markdown(f"**{r['ticker']}**")
+                badge = " 🌱" if r.get("emerging_potential") else ""
+                st.markdown(f"**{r['ticker']}{badge}**")
                 st.markdown(f"<span class='{css_class}'>{score:.1f}</span>", unsafe_allow_html=True)
                 st.caption(f"{r['emoji']} {r['recommendation']}")
                 st.caption(f"${r['price']:,.2f}")
                 for reason in r.get("reasons", [])[:3]:
                     st.markdown(f"<div class='reason-item'>{reason}</div>", unsafe_allow_html=True)
+
+        # Emerging potential candidates section
+        emerging = [r for r in top_results if r.get("emerging_potential")]
+        if emerging:
+            st.subheader("🌱 Emerging potential")
+            st.caption("Forward-looking tag — not part of the score. Worth a closer look.")
+            for r in emerging:
+                with st.expander(f"{r['ticker']} — {r['name'][:40]}"):
+                    for sig in r.get("emerging_signal_reasons", []):
+                        st.markdown(f"- {sig}")
+                    rd = r.get("rd_intensity")
+                    if rd is not None:
+                        st.caption(f"R&D / revenue: {rd*100:.1f}%")
 
     with tab2:
         col1, col2 = st.columns(2)
@@ -264,6 +279,11 @@ if results_cache:
                 st.subheader(f"📋 {selected['ticker']}")
                 st.metric("Score global", f"{selected['score']:.1f}/100")
                 st.metric("Signal", f"{selected['emoji']} {selected['recommendation']}")
+
+                if selected.get("emerging_potential"):
+                    st.success("🌱 **Emerging potential**")
+                    for sig in selected.get("emerging_signal_reasons", []):
+                        st.markdown(f"- {sig}")
 
                 # Décomposition du score
                 st.subheader("Décomposition du score")
