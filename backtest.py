@@ -21,6 +21,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import ALL_TICKERS, UNIVERSES, SCORING_WEIGHTS, BACKTEST
 from data.fetcher import fetch_ohlcv
 from analysis.technical import compute_indicators, get_technical_signals
+from analysis.stats import (
+    bootstrap_ci, bootstrap_pairs_ci, deflated_sharpe_ratio,
+    cagr as cagr_fn, sharpe as sharpe_fn, cagr_diff,
+)
 
 console = Console()
 
@@ -372,6 +376,20 @@ def run_backtest(
     n_cash_periods = sum(1 for p in periods if p.get("regime") == "RISK_OFF")
     pct_in_cash = n_cash_periods / n_periods if n_periods else 0.0
 
+    # ── Statistical hygiene: bootstrap CIs + Deflated Sharpe ──────────────
+    # Bootstrap on the net return series. Block bootstrap would be more
+    # correct (preserves any serial dependence) but for small T (~60) the
+    # gain over IID resampling is mild — keeping it simple.
+    n_boot = BACKTEST.get("n_boot", 1000)
+    ci_level = BACKTEST.get("bootstrap_ci", 0.95)
+    n_trials = BACKTEST.get("n_trials_for_dsr", 1)
+
+    cagr_pt, cagr_lo, cagr_hi     = bootstrap_ci(returns_net, cagr_fn, n_boot, ci_level)
+    sharpe_pt, sharpe_lo, sharpe_hi = bootstrap_ci(returns_net, sharpe_fn, n_boot, ci_level)
+    alpha_pt, alpha_lo, alpha_hi   = bootstrap_pairs_ci(returns_net, benchmark_returns, cagr_diff, n_boot, ci_level)
+
+    dsr_stats = deflated_sharpe_ratio(returns_net, n_trials=n_trials, periods_per_year=12)
+
     results = {
         "label":                  label or "Backtest",
         "n_periods":              n_periods,
@@ -398,6 +416,16 @@ def run_backtest(
         "avg_monthly_return_net": float(returns_net.mean()),
         "avg_monthly_excess_net": float(excess_returns_net.mean()),
         "periods":                periods,
+        # Statistical hygiene
+        "cagr_net_ci":            (cagr_lo, cagr_hi),
+        "sharpe_ci":              (sharpe_lo, sharpe_hi),
+        "alpha_net_ci":           (alpha_lo, alpha_hi),
+        "psr_zero":               dsr_stats["psr_zero"],
+        "dsr":                    dsr_stats["dsr"],
+        "sr_threshold_ann":       dsr_stats["sr_threshold_ann"],
+        "skew":                   dsr_stats["skew"],
+        "excess_kurtosis":        dsr_stats["excess_kurtosis"],
+        "n_trials":               n_trials,
     }
 
     if verbose:
@@ -452,11 +480,30 @@ def _print_results(r: dict):
     summary.add_row("Period", f"{r['years']:.1f} years ({r['n_periods']} months)", "")
     summary.add_row("Total Return (net)",  f"{r['total_return_net']*100:+.1f}%",  f"{r['benchmark_total_return']*100:+.1f}%")
     summary.add_row("CAGR (gross)",        f"{r['cagr_gross']*100:+.1f}%",        "")
-    summary.add_row("CAGR (net)",          f"{r['cagr_net']*100:+.1f}%",          f"{r['benchmark_cagr']*100:+.1f}%")
+
+    cagr_lo, cagr_hi = r["cagr_net_ci"]
+    summary.add_row(
+        "CAGR (net) [95% CI]",
+        f"{r['cagr_net']*100:+.1f}% [{cagr_lo*100:+.1f}, {cagr_hi*100:+.1f}]",
+        f"{r['benchmark_cagr']*100:+.1f}%",
+    )
     summary.add_row("Cost drag (CAGR)",    f"−{r['cost_drag_cagr']*100:.2f}%",    "—")
     summary.add_row("Alpha gross",         f"{r['alpha_gross']*100:+.1f}%",       "—")
-    summary.add_row("Alpha net",           f"[{alpha_color}]{alpha_net*100:+.1f}%[/{alpha_color}]", "—")
-    summary.add_row("Sharpe (net)",        f"{r['sharpe']:.2f}",                  f"{r['benchmark_sharpe']:.2f}")
+
+    alpha_lo, alpha_hi = r["alpha_net_ci"]
+    spans_zero = alpha_lo <= 0 <= alpha_hi
+    alpha_ci_color = "yellow" if spans_zero else alpha_color
+    summary.add_row(
+        "Alpha net [95% CI]",
+        f"[{alpha_ci_color}]{alpha_net*100:+.1f}% [{alpha_lo*100:+.1f}, {alpha_hi*100:+.1f}][/{alpha_ci_color}]",
+        "—",
+    )
+    sharpe_lo, sharpe_hi = r["sharpe_ci"]
+    summary.add_row(
+        "Sharpe (net) [95% CI]",
+        f"{r['sharpe']:.2f} [{sharpe_lo:+.2f}, {sharpe_hi:+.2f}]",
+        f"{r['benchmark_sharpe']:.2f}",
+    )
     summary.add_row("Max Drawdown",        f"{r['max_drawdown']*100:.1f}%",       f"{r['benchmark_max_drawdown']*100:.1f}%")
     summary.add_row("Win Rate vs SPY",     f"[{win_color}]{r['win_rate']*100:.0f}%[/{win_color}]", "—")
     summary.add_row("Avg Turnover/mo",     f"{r['avg_turnover']*100:.0f}%",       "")
@@ -464,6 +511,32 @@ def _print_results(r: dict):
     summary.add_row("Stickiness",          f"+{r['stickiness_bonus_pts']:.1f} pts", "")
     summary.add_row("Regime filter",       f"{'ON' if r['regime_filter'] else 'OFF'}", "")
     summary.add_row("% time in cash",      f"{r['pct_in_cash']*100:.0f}%", "")
+
+    # Deflated Sharpe block — the multiple-testing correction
+    summary.add_row("", "", "")
+    summary.add_row("Skew / Excess kurt",  f"{r['skew']:+.2f} / {r['excess_kurtosis']:+.2f}", "")
+
+    psr_zero = r["psr_zero"]
+    if psr_zero is not None:
+        psr_color = "green" if psr_zero >= 0.95 else "yellow" if psr_zero >= 0.80 else "red"
+        summary.add_row("PSR(0)",              f"[{psr_color}]{psr_zero*100:.1f}%[/{psr_color}]", "")
+
+    sr_thresh = r["sr_threshold_ann"]
+    if sr_thresh is not None:
+        summary.add_row(
+            f"Sharpe threshold (N={r['n_trials']} trials)",
+            f"{sr_thresh:.2f}",
+            "",
+        )
+
+    dsr = r["dsr"]
+    if dsr is not None:
+        dsr_color = "green" if dsr >= 0.95 else "yellow" if dsr >= 0.80 else "red"
+        summary.add_row(
+            "Deflated Sharpe Ratio (DSR)",
+            f"[{dsr_color}]{dsr*100:.1f}%[/{dsr_color}]",
+            "",
+        )
 
     console.print(summary)
 
@@ -536,29 +609,36 @@ def run_sweep(
     table = Table(title="Sweep summary (net of costs)", border_style="cyan")
     table.add_column("Universe", style="bold")
     table.add_column("CAGR net", justify="right")
-    table.add_column("SPY CAGR", justify="right")
     table.add_column("Alpha", justify="right")
+    table.add_column("Alpha 95% CI", justify="right")
     table.add_column("Sharpe", justify="right")
-    table.add_column("MDD", justify="right")
+    table.add_column("DSR", justify="right")
     table.add_column("Win", justify="right")
-    table.add_column("Turn./mo", justify="right")
-    table.add_column("Cash", justify="right")
+    table.add_column("Turn", justify="right")
     table.add_column("Deploy?", justify="center")
 
     for name, r in sorted(results.items(), key=lambda kv: kv[1]["alpha_net"], reverse=True):
         alpha_color = "green" if r["alpha_net"] > 0 else "red"
         win_color = "green" if r["win_rate"] > 0.5 else "yellow"
         verdict, vcolor, _ = _deploy_verdict(r)
+        alpha_lo, alpha_hi = r["alpha_net_ci"]
+        ci_str = f"[{alpha_lo*100:+.1f}, {alpha_hi*100:+.1f}]"
+        ci_color = "yellow" if alpha_lo <= 0 <= alpha_hi else alpha_color
+        dsr = r.get("dsr")
+        if dsr is None:
+            dsr_str = "n/a"
+        else:
+            dsr_color = "green" if dsr >= 0.95 else "yellow" if dsr >= 0.80 else "red"
+            dsr_str = f"[{dsr_color}]{dsr*100:.0f}%[/{dsr_color}]"
         table.add_row(
             name,
             f"{r['cagr_net']*100:+.1f}%",
-            f"{r['benchmark_cagr']*100:+.1f}%",
             f"[{alpha_color}]{r['alpha_net']*100:+.1f}%[/{alpha_color}]",
+            f"[{ci_color}]{ci_str}[/{ci_color}]",
             f"{r['sharpe']:.2f}",
-            f"{r['max_drawdown']*100:.1f}%",
+            dsr_str,
             f"[{win_color}]{r['win_rate']*100:.0f}%[/{win_color}]",
             f"{r['avg_turnover']*100:.0f}%",
-            f"{r['pct_in_cash']*100:.0f}%",
             f"[{vcolor}]{verdict}[/{vcolor}]",
         )
     console.print()

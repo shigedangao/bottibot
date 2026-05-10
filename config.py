@@ -99,6 +99,22 @@ TECHNICAL = {
     "volume_avg_period": 20,
     "momentum_period": 10,
     "lookback_days": 365,       # données historiques à charger
+    # Definition used by momentum_score in get_technical_signals.
+    # IC + quintile-spread validation on 60m, 4 universes (RESEARCH_PLAN.md status log):
+    #   "residual_12_1" — 12-1 of residuals from monthly stock-on-benchmark regression
+    #             (Blitz/Huij/Martens 2011). Default. Avg annualized quintile spread
+    #             +16.6% across 4 universes (vs +12.0% for raw 12_1). Major
+    #             improvement on GROWTH_TECH (+1.7% → +17.8%) and EU_LARGE
+    #             (+8.5% → +15.8%); slight cost on US_LARGE and SEMIS.
+    #   "12_1"  — Raw 12-month return, skip last month. Jegadeesh-Titman / Carhart.
+    #             4/4 universes positive but weaker on sector-concentrated baskets
+    #             where market-beta noise dominates.
+    #   "12"    — 12-month return, no skip. Highest IR on US_LARGE alone but noisier.
+    #   "6_1"   — 6-1 variant. ~Equivalent to legacy.
+    #   "60d"   — Raw 60-day return.
+    #   "legacy" — Original 10/20/60/120 weighted blend. Anti-predictive in 3/4
+    #             universes during validation. Kept reachable for A/B comparison.
+    "momentum_definition": "residual_12_1",
 }
 
 # ──────────────────────────────────────────────
@@ -172,15 +188,39 @@ SECTOR_BENCHMARK_DEFAULT = {
 
 # ──────────────────────────────────────────────
 # Poids du score final (doivent sommer à 1.0)
+#
+# Two presets:
+# - FIXED: original hand-picked balance, kept for A/B reversibility.
+# - IC:    derived from 60m IC sweep across 4 universes (US_LARGE, EU_LARGE,
+#          GROWTH_TECH, SEMICONDUCTORS). Each technical signal's avg IR was
+#          floored at 0 and renormalized within the 0.70 technical budget.
+#
+# Average IR by signal (60m sweep, RESEARCH_PLAN.md status log):
+#   residual momentum: +0.52  → ~67% of technical budget → 0.47 absolute
+#   trend:             -0.04  → floored to 0
+#   rsi:               +0.14  → ~18% → 0.13
+#   volume:            +0.12  → ~15% → 0.10
+# Fundamental/quality (0.20/0.10) unchanged — not yet IC-validated since
+# backtest excludes fundamentals to avoid look-ahead.
 # ──────────────────────────────────────────────
-SCORING_WEIGHTS = {
-    "momentum":     0.25,   # tendance des prix court terme
-    "trend":        0.25,   # structure de tendance (EMA)
-    "rsi":          0.10,   # RSI : ni suracheté, ni survendu
-    "volume":       0.10,   # confirmation du volume
-    "fundamental":  0.20,   # santé financière
-    "quality":      0.10,   # profitabilité (marge, ROE)
+SCORING_WEIGHTS_FIXED = {
+    "momentum":     0.25,
+    "trend":        0.25,
+    "rsi":          0.10,
+    "volume":       0.10,
+    "fundamental":  0.20,
+    "quality":      0.10,
 }
+SCORING_WEIGHTS_IC = {
+    "momentum":     0.47,
+    "trend":        0.00,
+    "rsi":          0.13,
+    "volume":       0.10,
+    "fundamental":  0.20,
+    "quality":      0.10,
+}
+# Active preset — flip to SCORING_WEIGHTS_FIXED to revert hand-picked balance.
+SCORING_WEIGHTS = SCORING_WEIGHTS_IC
 
 # ──────────────────────────────────────────────
 # VIX / Market regime
@@ -269,6 +309,16 @@ BACKTEST = {
         "strong": {"alpha_net": 0.05, "sharpe": 0.70, "win_rate": 0.45, "max_drawdown_floor": -0.40},
         "ok":     {"alpha_net": 0.02, "sharpe": 0.50, "win_rate": 0.40, "max_drawdown_floor": -0.50},
     },
+    # Statistical hygiene (Phase 0.3)
+    "n_boot":           1000,   # bootstrap iterations for CIs
+    "bootstrap_ci":     0.95,   # 95% confidence intervals
+    # n_trials_for_dsr: number of variants tested while developing the strategy.
+    # Drives the Deflated Sharpe Ratio's multi-test correction. Bumped each
+    # time we A/B a meaningful new variant in the research workflow. Be
+    # honest about this — undercounting inflates DSR, overcounting deflates
+    # it. Counts variants explicitly tested via IC sweeps + backtests, not
+    # every read-only diagnostic.
+    "n_trials_for_dsr": 20,
 }
 
 # ──────────────────────────────────────────────

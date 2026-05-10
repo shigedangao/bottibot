@@ -57,6 +57,12 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["momentum_60d"]  = close.pct_change(60) * 100
     df["momentum_120d"] = close.pct_change(120) * 100
 
+    # 12-1 and 6-1 momentum: skip the most recent month to dodge short-term
+    # reversal (Jegadeesh-Titman / Carhart). Return from t-N to t-21 days.
+    df["momentum_12"]   = close.pct_change(252) * 100
+    df["momentum_12_1"] = (close.shift(21) / close.shift(252) - 1) * 100
+    df["momentum_6_1"]  = (close.shift(21) / close.shift(126) - 1) * 100
+
     # ── ADX (force de la tendance) ────────────────────────────
     df["adx"] = _compute_adx(high, low, close, 14)
 
@@ -116,13 +122,19 @@ def get_technical_signals(df: pd.DataFrame, benchmark_df: pd.DataFrame | None = 
     m60  = row["momentum_60d"]  if not pd.isna(row["momentum_60d"])  else 0
     m120 = row["momentum_120d"] if not pd.isna(row["momentum_120d"]) else 0
 
-    # Score momentum pondéré (court terme compte plus)
-    mom_raw = m10 * 0.4 + m20 * 0.3 + m60 * 0.2 + m120 * 0.1
-    # Normaliser : -30% → 0, +30% → 1
-    signals["momentum_score"] = max(0.0, min(1.0, (mom_raw + 30) / 60))
     signals["momentum_10d"]  = m10
     signals["momentum_20d"]  = m20
     signals["momentum_60d"]  = m60
+    signals["momentum_120d"] = m120
+
+    # Skip-recent-month variants — exposed raw (NaN propagates) so IC harness
+    # can drop missing-history tickers instead of giving them a tied rank.
+    for col in ("momentum_12", "momentum_12_1", "momentum_6_1"):
+        if col in df.columns:
+            val = df[col].iloc[-1]
+            signals[col] = float(val) if not pd.isna(val) else float("nan")
+        else:
+            signals[col] = float("nan")
 
     # ── Relative Strength vs Benchmark ────────────────────────
     if benchmark_df is not None and len(benchmark_df) >= 60:
@@ -140,9 +152,29 @@ def get_technical_signals(df: pd.DataFrame, benchmark_df: pd.DataFrame | None = 
         # Normalize: -20% excess → 0, +20% excess → 1
         signals["relative_strength_score"] = max(0.0, min(1.0, (excess_raw + 20) / 40))
         signals["excess_return_60d"] = round(excess_60, 1)
+
+        # Residual momentum 12-1 (Blitz/Huij/Martens 2011): regress monthly
+        # stock returns on monthly benchmark returns over a 36m window, then
+        # sum the residuals over months t-12..t-1. Strips market beta so we
+        # rank stocks on idiosyncratic momentum, not "long whichever sector ran".
+        signals["residual_momentum_12_1"] = _compute_residual_momentum_12_1(
+            df["close"], bench_close, regression_window_months=36
+        )
+
+        # Rolling 36-month beta vs benchmark (Frazzini-Pedersen BAB 2014).
+        # Low-beta stocks tend to deliver higher risk-adjusted returns —
+        # leverage-constrained investors overpay for high-beta. Long-only
+        # interpretation: rank by inverse beta.
+        signals["beta_36m"] = _compute_beta(df["close"], bench_close, window_months=36)
     else:
         signals["relative_strength_score"] = 0.5
         signals["excess_return_60d"] = 0.0
+        signals["residual_momentum_12_1"] = float("nan")
+        signals["beta_36m"] = float("nan")
+
+    # Compute momentum_score AFTER residual_momentum_12_1 is populated, since
+    # the production "residual_12_1" definition reads from signals["residual_momentum_12_1"].
+    signals["momentum_score"] = _momentum_score(signals, TECHNICAL.get("momentum_definition", "12_1"))
 
     # ── MACD ─────────────────────────────────────────────────
     signals["macd_bullish"] = 1.0 if row["macd"] > row["macd_signal"] else 0.0
@@ -168,6 +200,125 @@ def get_technical_signals(df: pd.DataFrame, benchmark_df: pd.DataFrame | None = 
 # ─────────────────────────────────────────────────────────────
 # Helpers privés
 # ─────────────────────────────────────────────────────────────
+
+def _compute_beta(
+    ticker_close: pd.Series,
+    benchmark_close: pd.Series,
+    window_months: int = 36,
+) -> float:
+    """
+    Rolling beta of monthly stock returns regressed on monthly benchmark
+    returns over the trailing `window_months` months.
+
+    Returns NaN if there isn't enough aligned monthly history or if the
+    benchmark variance is zero.
+    """
+    try:
+        stock_m = ticker_close.resample("ME").last()
+        bench_m = benchmark_close.resample("ME").last()
+    except Exception:
+        return float("nan")
+
+    aligned = pd.concat(
+        [stock_m.pct_change(), bench_m.pct_change()], axis=1, join="inner"
+    ).dropna()
+    aligned.columns = ["stock", "bench"]
+
+    if len(aligned) < window_months:
+        return float("nan")
+
+    window = aligned.iloc[-window_months:]
+    var_b = float(window["bench"].var())
+    if var_b <= 0:
+        return float("nan")
+    cov = float(window["stock"].cov(window["bench"]))
+    return cov / var_b
+
+
+def _compute_residual_momentum_12_1(
+    ticker_close: pd.Series,
+    benchmark_close: pd.Series,
+    regression_window_months: int = 36,
+) -> float:
+    """
+    Residual momentum 12-1 per Blitz, Huij & Martens (2011).
+
+    Resamples to monthly closes, regresses stock monthly returns on benchmark
+    monthly returns over the trailing `regression_window_months` to estimate
+    alpha and beta, then returns the sum of residuals over months t-12 to t-1
+    (skipping the most recent month, same convention as 12-1).
+
+    Returns NaN if there isn't enough aligned monthly history.
+    """
+    try:
+        stock_m = ticker_close.resample("ME").last()
+        bench_m = benchmark_close.resample("ME").last()
+    except Exception:
+        return float("nan")
+
+    stock_ret = stock_m.pct_change()
+    bench_ret = bench_m.pct_change()
+
+    aligned = pd.concat([stock_ret, bench_ret], axis=1, join="inner").dropna()
+    aligned.columns = ["stock", "bench"]
+
+    # Need at least the regression window + the 12-month momentum lookback.
+    # Use the regression window itself (the trailing N months) for estimating
+    # alpha/beta; the 12-1 sum then runs inside that window.
+    if len(aligned) < regression_window_months:
+        return float("nan")
+
+    window = aligned.iloc[-regression_window_months:]
+    X = np.column_stack([np.ones(len(window)), window["bench"].values])
+    y = window["stock"].values
+    try:
+        coefs, *_ = np.linalg.lstsq(X, y, rcond=None)
+    except np.linalg.LinAlgError:
+        return float("nan")
+    alpha, beta = float(coefs[0]), float(coefs[1])
+
+    residuals = window["stock"] - (alpha + beta * window["bench"])
+
+    # 12-1 window: months t-12 through t-1 inclusive = 11 monthly residuals,
+    # skipping the most recent month.
+    if len(residuals) < 13:
+        return float("nan")
+    return float(residuals.iloc[-12:-1].sum() * 100)  # match other momentum signals (percent)
+
+
+def _momentum_score(signals: dict, definition: str) -> float:
+    """
+    Map a raw momentum signal to a 0-1 score depending on the configured
+    definition. Falls back to neutral 0.5 when the underlying value is
+    missing — that way universes with insufficient history don't get scored
+    artificially low.
+    """
+    def _norm(value, half_range_pct):
+        # Symmetric clip-and-normalize around 0: -range → 0, +range → 1
+        if value is None or pd.isna(value):
+            return 0.5
+        return max(0.0, min(1.0, (value + half_range_pct) / (2 * half_range_pct)))
+
+    if definition == "residual_12_1":
+        # Sum of 11 monthly residuals (% units). Typical range ±30%.
+        return _norm(signals.get("residual_momentum_12_1"), 30)
+    if definition == "12_1":
+        return _norm(signals.get("momentum_12_1"), 50)
+    if definition == "12":
+        return _norm(signals.get("momentum_12"), 50)
+    if definition == "6_1":
+        return _norm(signals.get("momentum_6_1"), 30)
+    if definition == "60d":
+        return _norm(signals.get("momentum_60d", 0), 30)
+
+    # legacy — original 10/20/60/120 weighted blend, kept for reversibility.
+    m10  = signals.get("momentum_10d",  0)
+    m20  = signals.get("momentum_20d",  0)
+    m60  = signals.get("momentum_60d",  0)
+    m120 = signals.get("momentum_120d", 0)
+    mom_raw = m10 * 0.4 + m20 * 0.3 + m60 * 0.2 + m120 * 0.1
+    return max(0.0, min(1.0, (mom_raw + 30) / 60))
+
 
 def _compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()

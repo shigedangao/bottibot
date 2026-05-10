@@ -9,7 +9,10 @@ from config import SCORING_WEIGHTS, TECHNICAL, VIX
 
 
 def _get_adjusted_weights(vix_regime: str | None) -> dict:
-    """Return scoring weights adjusted for the current VIX regime."""
+    """Return scoring weights adjusted for the current VIX regime.
+    VIX adjustments are calibrated against the old fixed weights; floor at 0
+    so that, for instance, trend (now 0.00 base) doesn't go negative under
+    ELEVATED (-0.03) or PANIC (-0.05) regimes."""
     base = dict(SCORING_WEIGHTS)
     if vix_regime == "ELEVATED":
         adj = VIX["elevated_adj"]
@@ -17,7 +20,7 @@ def _get_adjusted_weights(vix_regime: str | None) -> dict:
         adj = VIX["panic_adj"]
     else:
         return base
-    return {k: base[k] + adj.get(k, 0) for k in base}
+    return {k: max(0.0, base[k] + adj.get(k, 0)) for k in base}
 
 
 def compute_final_score(

@@ -58,6 +58,9 @@ Transaction cost model: configurable `BACKTEST["cost_per_side_bps"]` (default 15
 ## Stack
 - Python 3.14 via uv, yfinance, pandas, numpy, Streamlit, Plotly, Rich
 
+## Active research
+See `RESEARCH_PLAN.md` for the iterative quant-rigor roadmap (IC harness, residual momentum, factor combination, deflated Sharpe). Update its status log as phases land.
+
 ## Roadmap
 1. Run 60-month backtests across all major universes and document findings in the repo (validation work — early sweeps suggest the strategy struggles to clear costs over 24 months)
 2. Telegram/email alerts when score crosses a threshold
