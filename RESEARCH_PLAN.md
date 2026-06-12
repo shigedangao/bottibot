@@ -375,3 +375,17 @@ Open-access PDFs.
   - Broader universe: add S&P 500 or MSCI World — variance reduction from more names.
   - Point-in-time fundamentals — required to test Phase 1.3 (quality) without look-ahead.
   - Stop iterating on technical factors until we can do these. More variants = lower DSR.
+
+- **2026-06-12** — Emerging universes + 🌱 badge validation. Added three curated smaller-cap universes (`TECH_EMERGING`, `SEMIS_EMERGING`, `PHARMA_EMERGING`), a liquidity filter (`LIQUIDITY` / `avg_dollar_volume`, $5M/day floor — flows into screener + digest), and a small-cap cost preset (`--cost-preset small_cap` = 30 bps/side).
+
+  **60-month backtest at realistic 30 bps cost (top 5):** only **1/3** beat SPY net — SEMIS_EMERGING (+18.6% alpha) but its alpha 95% CI is **[-15.1%, +58.2%]** (spans zero) and DSR 30%. TECH_EMERGING (-11.1% alpha) and PHARMA_EMERGING (-1.8%) both NO. Survivorship bias inflates all three.
+
+  **🌱 badge validation** (`analysis/badge_validation.py`) — does a badged stock beat the non-badged names in its universe over the next 3–6 months? Forward returns in excess of SPY, non-overlapping windows. **Decisive null:** every spread's 95% CI spans zero.
+
+  | Universe | 3mo spread (CI) | 6mo spread (CI) |
+  |---|---|---|
+  | TECH_EMERGING   | **−8.6%** [−25.4, +5.1] | −0.9% [−26.4, +20.2] |
+  | SEMIS_EMERGING  | **−4.2%** [−13.9, +4.6] | **−4.8%** [−23.4, +12.3] |
+  | PHARMA_EMERGING | +5.5% [−3.3, +16.0] | +12.5% [−6.6, +32.4] |
+
+  4 of 6 cells are *negative*; the 2 positive (pharma) include zero. And this is the **look-ahead-flattered** version (current fundamentals applied to past dates — only price signals are point-in-time), so the true edge is likely worse, not better. **Conclusion: the 🌱 badge is a discovery/watchlist tag, not a return predictor — it must not drive buy decisions.** Matches `potential.py`'s own "does NOT predict success" docstring; now empirically confirmed. The clean test still needs point-in-time fundamentals (or snapshot badge labels forward and wait).

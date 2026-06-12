@@ -3,6 +3,13 @@
 # Forward-looking "future leader" tag — separate from the 0-100 score.
 # This is intentionally a noisy signal (for every ASML there are 100 misses):
 # the badge flags candidates worth a closer look, it does NOT predict success.
+#
+# Empirically confirmed (2026-06-12): `analysis/badge_validation.py` found NO
+# detectable forward edge — across TECH/SEMIS/PHARMA_EMERGING, the 3–6mo excess
+# return of badged vs non-badged names had 95% CIs spanning zero (4 of 6 cells
+# negative), and that's the look-ahead-flattered version. Treat this as a
+# discovery/watchlist tag only; do NOT let it drive buy decisions.
+# See RESEARCH_PLAN.md status log.
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
