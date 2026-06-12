@@ -670,8 +670,13 @@ if __name__ == "__main__":
     parser.add_argument("--benchmark", default="SPY", help="Benchmark ticker (default SPY)")
     parser.add_argument("--concurrency", type=int, default=5,
                         help="Max concurrent Yahoo API calls when fetching history (default 5)")
-    parser.add_argument("--cost-bps", type=float, default=BACKTEST["cost_per_side_bps"],
-                        help=f"Per-side transaction cost in bps (default {BACKTEST['cost_per_side_bps']:.0f})")
+    parser.add_argument("--cost-bps", type=float, default=None,
+                        help=f"Per-side transaction cost in bps (default {BACKTEST['cost_per_side_bps']:.0f}, "
+                             f"or the --cost-preset value). Explicit value wins over the preset.")
+    parser.add_argument("--cost-preset", choices=list(BACKTEST["cost_presets"].keys()), default=None,
+                        help="Cost preset by universe type: "
+                             + ", ".join(f"{k}={v:.0f}bps" for k, v in BACKTEST["cost_presets"].items())
+                             + ". Use small_cap for the *_EMERGING universes.")
     parser.add_argument("--stickiness", type=float, default=BACKTEST["stickiness_bonus_pts"],
                         help=f"Score bonus for currently-held positions during sort, in score points "
                              f"(default {BACKTEST['stickiness_bonus_pts']:.1f}). 0 = pure top-N every month.")
@@ -687,6 +692,14 @@ if __name__ == "__main__":
                              f"Or pass names: --sweep US_LARGE EU_LARGE")
     args = parser.parse_args()
 
+    # Resolve per-side cost: explicit --cost-bps wins, then --cost-preset, then config default.
+    if args.cost_bps is not None:
+        cost_bps = args.cost_bps
+    elif args.cost_preset is not None:
+        cost_bps = BACKTEST["cost_presets"][args.cost_preset]
+    else:
+        cost_bps = BACKTEST["cost_per_side_bps"]
+
     if args.sweep is not None:
         names = args.sweep if args.sweep else BACKTEST["sweep_universes"]
         invalid = [n for n in names if n not in UNIVERSES]
@@ -699,7 +712,7 @@ if __name__ == "__main__":
             top_n=args.top,
             benchmark_ticker=args.benchmark,
             concurrency=args.concurrency,
-            cost_per_side_bps=args.cost_bps,
+            cost_per_side_bps=cost_bps,
             stickiness_bonus_pts=args.stickiness,
             regime_filter=args.regime_filter,
         )
@@ -720,7 +733,7 @@ if __name__ == "__main__":
             top_n=args.top,
             benchmark_ticker=args.benchmark,
             concurrency=args.concurrency,
-            cost_per_side_bps=args.cost_bps,
+            cost_per_side_bps=cost_bps,
             stickiness_bonus_pts=args.stickiness,
             regime_filter=args.regime_filter,
             label=label,

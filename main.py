@@ -11,8 +11,11 @@ from rich import print as rprint
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import ALL_TICKERS, UNIVERSES, DASHBOARD
-from data.fetcher import fetch_ohlcv, fetch_fundamentals, fetch_vix, fetch_benchmark, fetch_earnings_date, fetch_rd_intensity
+from config import ALL_TICKERS, UNIVERSES, DASHBOARD, LIQUIDITY
+from data.fetcher import (
+    fetch_ohlcv, fetch_fundamentals, fetch_vix, fetch_benchmark,
+    fetch_earnings_date, fetch_rd_intensity, avg_dollar_volume,
+)
 from analysis.technical import compute_indicators, get_technical_signals
 from analysis.fundamental import get_fundamental_signals, format_fundamentals_display
 from analysis.potential import detect_emerging_potential, format_potential_reasons
@@ -68,12 +71,16 @@ def analyze_ticker(
     # Prix actuel
     current_price = df["close"].iloc[-1]
 
+    # Liquidity proxy — average daily dollar volume (tradeability gate)
+    adv = avg_dollar_volume(df, window=LIQUIDITY["lookback_days"])
+
     return {
         "ticker":          ticker,
         "name":            fundamentals.get("name", ticker),
         "sector":          fundamentals.get("sector", "Unknown"),
         "currency":        fundamentals.get("currency", "USD"),
         "price":           round(current_price, 2),
+        "avg_dollar_volume": adv,
         "score":           score_result["score"],
         "recommendation":  score_result["recommendation"],
         "emoji":           score_result["emoji"],
@@ -122,13 +129,18 @@ def run_screener(
     top_n: int = None,
     max_per_sector: int = 0,
     concurrency: int = 5,
+    min_dollar_volume: float | None = None,
 ) -> list[dict]:
     """
     Run the screener on a list of tickers with bounded concurrency.
-    Returns results sorted by score.
+    Returns results sorted by score. Names below `min_dollar_volume` average
+    daily dollar volume are dropped as untradeable (0 disables the filter;
+    None uses the LIQUIDITY config default).
     """
     tickers = tickers or ALL_TICKERS
     top_n   = top_n   or DASHBOARD["top_n"]
+    if min_dollar_volume is None:
+        min_dollar_volume = LIQUIDITY["min_avg_dollar_volume"]
     results = []
 
     # Fetch benchmark (SPY) + VIX regime (once for the whole run)
@@ -171,6 +183,22 @@ def run_screener(
                 if result:
                     results.append(result)
                 progress.advance(task)
+
+    # Liquidity gate — drop untradeable names (thin average dollar volume).
+    # Tickers with no volume data (adv is None) are kept; the filter only acts
+    # on names we can positively confirm are below the floor.
+    if min_dollar_volume and min_dollar_volume > 0:
+        dropped = [r for r in results
+                   if r.get("avg_dollar_volume") is not None
+                   and r["avg_dollar_volume"] < min_dollar_volume]
+        results = [r for r in results if r not in dropped]
+        if dropped:
+            floor_m = min_dollar_volume / 1e6
+            names = ", ".join(f"{r['ticker']} (${r['avg_dollar_volume']/1e6:.1f}M)" for r in dropped)
+            console.print(
+                f"\n[dim]💧 Liquidity filter (<${floor_m:.0f}M/day) dropped "
+                f"{len(dropped)}: {names}[/dim]"
+            )
 
     ranked = rank_stocks(results, max_per_sector=max_per_sector)
 
@@ -288,6 +316,9 @@ if __name__ == "__main__":
                         help="Max stocks per sector in results (0 = no cap)")
     parser.add_argument("--concurrency", type=int, default=5,
                         help="Max concurrent Yahoo API calls (default 5)")
+    parser.add_argument("--min-dollar-volume", type=float, default=None,
+                        help=f"Min average daily dollar volume to be tradeable "
+                             f"(default ${LIQUIDITY['min_avg_dollar_volume']/1e6:.0f}M; 0 disables)")
     args = parser.parse_args()
 
     if args.tickers:
@@ -302,4 +333,5 @@ if __name__ == "__main__":
         top_n=args.top,
         max_per_sector=args.max_per_sector,
         concurrency=args.concurrency,
+        min_dollar_volume=args.min_dollar_volume,
     )

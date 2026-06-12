@@ -229,6 +229,20 @@ def fetch_batch(tickers: list[str], period: str = "1y", verbose: bool = True) ->
     return results
 
 
+def avg_dollar_volume(df: pd.DataFrame, window: int = 20) -> float | None:
+    """
+    Average daily dollar volume (close × volume) over the last `window` days.
+    A liquidity / tradeability proxy. Returns None if data is insufficient.
+    """
+    if df is None or "volume" not in df or "close" not in df or len(df) < 1:
+        return None
+    tail = df.tail(window)
+    dollar = (tail["close"] * tail["volume"]).dropna()
+    if dollar.empty:
+        return None
+    return float(dollar.mean())
+
+
 def get_price_change(df: pd.DataFrame, days: int) -> float:
     """Calcule la variation de prix sur N jours."""
     if len(df) < days:

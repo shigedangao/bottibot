@@ -86,7 +86,7 @@ UNIVERSES = {
     # ──────────────────────────────────────────────
     "TECH_EMERGING": [
         # Software / data / AI infra (mid & small cap)
-        "GTLB", "FROG", "ESTC", "DOCN", "BRZE", "AMPL", "PD", "SMAR",
+        "GTLB", "FROG", "ESTC", "DOCN", "BRZE", "AMPL", "PD",
         "PCOR", "BL", "APPN", "FSLY", "BOX", "DV", "SOUN", "BBAI",
         # Cybersecurity challengers
         "TENB", "RPD", "CXM", "VRNS",
@@ -150,6 +150,19 @@ FUNDAMENTAL = {
     "min_revenue_growth": -0.10,   # croissance CA > -10% (on garde les stables)
     "max_pe_ratio": 80,            # P/E max (pour éviter les bulles extrêmes)
     "min_pe_ratio": 0,             # on exclut les pertes nettes
+}
+
+# ──────────────────────────────────────────────
+# Liquidity filter (tradeability)
+# Average daily dollar volume = mean(close × volume) over `lookback_days`.
+# Below `min_avg_dollar_volume`, the slippage assumptions in the cost model no
+# longer hold and a retail order moves the price — so these names are dropped
+# from the screener (and therefore the digest). Especially relevant for the
+# *_EMERGING universes. Set min to 0 (or pass --min-dollar-volume 0) to disable.
+# ──────────────────────────────────────────────
+LIQUIDITY = {
+    "min_avg_dollar_volume": 5_000_000.0,   # $5M/day floor for ~30 bps slippage to be realistic
+    "lookback_days": 20,
 }
 
 # ──────────────────────────────────────────────
@@ -308,6 +321,14 @@ EMERGING_POTENTIAL = {
 # ──────────────────────────────────────────────
 BACKTEST = {
     "cost_per_side_bps": 15.0,
+    # Per-side cost presets by universe type. large_cap = liquid US/EU mega-caps
+    # (Degiro/IBKR fees + tight spreads). small_cap doubles it to reflect wider
+    # spreads and real market impact on smaller / emerging names — use this when
+    # backtesting the *_EMERGING universes via --cost-preset small_cap.
+    "cost_presets": {
+        "large_cap": 15.0,
+        "small_cap": 30.0,
+    },
     "default_lookback_months": 36,
     # Stickiness — currently-held positions get this many points added during
     # the rebalance sort, so a challenger must beat a held name by more than
