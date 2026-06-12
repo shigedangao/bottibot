@@ -66,6 +66,7 @@ def generate_digest(
         "universe": universe,
         "top_n": top_n,
         "top": current[:top_n],
+        "emerging": [r for r in current if r.get("emerging_potential")][:8],
         "earnings_soon": [r for r in current if r.get("earnings_soon")],
         "has_previous": previous is not None,
         "score_movers": [],

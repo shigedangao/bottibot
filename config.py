@@ -78,6 +78,29 @@ UNIVERSES = {
         # Asia pharma
         "4568.T", "4519.T", "CSL.AX",                        # Daiichi Sankyo, Chugai, CSL
     ],
+    # ──────────────────────────────────────────────
+    # Emerging counterparts — smaller / earlier-stage names per domain.
+    # Lower market cap, less analyst coverage, higher risk-and-upside than the
+    # mega-cap lists above. Same scoring; the 🌱 EMERGING_POTENTIAL badge is
+    # more likely to fire here. Curated by hand — edit freely.
+    # ──────────────────────────────────────────────
+    "TECH_EMERGING": [
+        # Software / data / AI infra (mid & small cap)
+        "GTLB", "FROG", "ESTC", "DOCN", "BRZE", "AMPL", "PD", "SMAR",
+        "PCOR", "BL", "APPN", "FSLY", "BOX", "DV", "SOUN", "BBAI",
+        # Cybersecurity challengers
+        "TENB", "RPD", "CXM", "VRNS",
+    ],
+    "SEMIS_EMERGING": [
+        # Smaller chip designers, analog, equipment & EDA (not the mega-caps)
+        "ALGM", "POWI", "SITM", "CRUS", "SLAB", "LSCC", "AMBA", "RMBS",
+        "SMTC", "ONTO", "ACLS", "FORM", "UCTT", "CEVA", "INDI", "NVTS",
+    ],
+    "PHARMA_EMERGING": [
+        # Mid & small biotech, gene editing, med-tech challengers
+        "CRSP", "NTLA", "BEAM", "RXRX", "VKTX", "ARWR", "SRPT", "RARE",
+        "HALO", "EXEL", "INSM", "CYTK", "MDGL", "IONS", "ACAD", "ARVN",
+    ],
 }
 
 # Tous les tickers combinés pour le screener global

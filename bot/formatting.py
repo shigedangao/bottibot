@@ -13,30 +13,38 @@ def _fmt_pct(value: float) -> str:
     return f"{value:+.1f}%"
 
 
-def _row(r: dict) -> str:
+def _row(r: dict) -> list[str]:
+    """Two tightened lines per pick: signal line + stats line."""
     mom = r.get("momentum_60d", 0)
     rs = r.get("excess_return_60d", 0)
-    return (
-        f"{_escape(r['emoji'])} *{_escape(r['ticker'])}* "
-        f"`{r['score']:.1f}` {_escape(r['recommendation'])} "
-        f"\\| 60d {_escape(_fmt_pct(mom))} vs SPY {_escape(_fmt_pct(rs))}"
+    rr = r.get("rr_ratio")
+    badge = " 🌱" if r.get("emerging_potential") else ""
+    head = (
+        f"{_escape(r['emoji'])} *{_escape(r['ticker'])}*  "
+        f"`{r['score']:.1f}`  {_escape(r['recommendation'])}{badge}"
     )
+    stats = f"   60d {_escape(_fmt_pct(mom))} · vs SPY {_escape(_fmt_pct(rs))}"
+    if rr:
+        stats += f" · R/R `{rr}:1`"
+    return [head, stats]
 
 
 def format_digest_markdown(digest: dict) -> str:
     """Render a digest as Telegram MarkdownV2. Safe to send as-is."""
-    today = datetime.now().strftime("%A %d %B %Y")
-    lines = [f"📊 *Morning digest* — {_escape(today)}", f"_Universe: {_escape(digest['universe'])}_", ""]
+    today = datetime.now().strftime("%a %d %b")
+    universe = digest["universe"].replace("_", " ")
+    lines = [f"📊 *Morning digest* — {_escape(today)}", f"_Universe: {_escape(universe)}_", ""]
 
     lines.append(f"*🏆 Top {digest['top_n']}*")
     for r in digest["top"]:
-        lines.append(_row(r))
-        sl = r.get("stop_loss_pct")
-        tp = r.get("take_profit_pct")
-        rr = r.get("rr_ratio")
-        if sl and tp:
-            lines.append(f"  SL `{_escape(str(sl))}%` \\| TP `\\+{_escape(str(tp))}%` \\| R/R `{_escape(str(rr))}:1`")
+        lines.extend(_row(r))
     lines.append("")
+
+    if digest.get("emerging"):
+        lines.append("*🌱 Emerging potential*")
+        for r in digest["emerging"]:
+            lines.append(f"• *{_escape(r['ticker'])}* `{r['score']:.1f}` {_escape(r['recommendation'])}")
+        lines.append("")
 
     if digest["entered_buy"]:
         lines.append("*🟢 New BUY signals*")
